@@ -116,7 +116,7 @@ export function DocLixeiraDialog(props: {
                 <li key={item.id} className="rounded-lg border bg-card p-3">
                   <div className="flex items-start justify-between gap-2">
                     <div className="min-w-0">
-                      <p className="truncate font-medium">{item.colaborador_nome ?? "Sem colaborador"}</p>
+                      <p className="break-words font-medium leading-snug">{item.colaborador_nome ?? "Sem colaborador"}</p>
                       <p className="text-sm text-muted-foreground">
                         {docTipoLabel(item.tipo)} · {competenciaLixeira(item.referencia_data)}
                         {item.unidade_nome ? ` · ${item.unidade_nome}` : ""}
