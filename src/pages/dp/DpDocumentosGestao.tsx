@@ -24,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { compararUrgencia, filtrarAbertas, isDocumentoPendencia, urgenciaDe } from "@/lib/dp/pendencias";
 import { useStablePendencias, UrgenciaBadge } from "@/components/dp/home/PendenciasCard";
 import DpHistoricoCompleto from "@/pages/dp/DpHistoricoCompleto";
+import { BotaoLixeira } from "@/components/dp/documentos/DocLixeiraDialog";
 
 const MESES = [
   "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -45,7 +46,7 @@ const dataBR = (d: string) => new Date(d.slice(0, 10) + "T12:00:00").toLocaleDat
  * inicial, filtrado para documentos). O clique abre uma gaveta na própria
  * tela — sem navegar para fora — com as ações e os botões de resolução.
  */
-export function AcoesDocumentosCard({ onImportar, onHistorico }: { onImportar?: () => void; onHistorico?: () => void } = {}) {
+export function AcoesDocumentosCard({ onImportar, onHistorico, onLixeira }: { onImportar?: () => void; onHistorico?: () => void; onLixeira?: () => void } = {}) {
   const { selectedCompanyId } = useCompanyContext();
   const pendencias = useDpPendencias();
   const { data, isLoading, isFetching, isRefreshing, isError, refetch, dataUpdatedAt, lastCalculatedAt } = pendencias;
@@ -187,6 +188,12 @@ export function AcoesDocumentosCard({ onImportar, onHistorico }: { onImportar?: 
             <History className="h-4 w-4" aria-hidden="true" />
           </Button>
         )}
+        {onLixeira && (
+          // No computador a Lixeira fica na barra da lista, ao lado do Registro de Alterações.
+          <div className="md:hidden">
+            <BotaoLixeira icone companyId={selectedCompanyId ?? null} onClick={onLixeira} />
+          </div>
+        )}
         {onImportar && (
           <Button type="button" className="h-11 shrink-0 gap-1.5 rounded-xl px-3" onClick={onImportar}>
             <Upload className="h-4 w-4" aria-hidden="true" />
@@ -265,6 +272,8 @@ export default function DpDocumentosGestao() {
   );
   /** Aba inicial da janela de importação: envio novo ou histórico de lotes. */
   const [abaInicial, setAbaInicial] = useState<"enviar" | "historico">("enviar");
+  /** Lixeira aberta pelo atalho do topo (celular) ou pela barra da lista (computador). */
+  const [lixeiraAberta, setLixeiraAberta] = useState(false);
 
   /**
    * O aviso vive na URL (veio do atalho "Resolver"). Fechá-lo precisa apagar os
@@ -330,6 +339,7 @@ export default function DpDocumentosGestao() {
       <AcoesDocumentosCard
         onImportar={() => { setAbaInicial("enviar"); setImportarAberto(true); }}
         onHistorico={() => { setAbaInicial("historico"); setImportarAberto(true); }}
+        onLixeira={() => setLixeiraAberta(true)}
       />
 
       {lotesAbertos.length > 0 && (
@@ -371,7 +381,7 @@ export default function DpDocumentosGestao() {
       />
 
       {/* Listagem completa da equipe (antiga tela "Histórico"), embutida. */}
-      <DpHistoricoCompleto embutido />
+      <DpHistoricoCompleto embutido lixeiraAberta={lixeiraAberta} onLixeiraAbertaChange={setLixeiraAberta} />
     </DpPage>
   );
 }

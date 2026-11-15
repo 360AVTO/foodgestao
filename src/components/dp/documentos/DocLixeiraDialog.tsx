@@ -32,20 +32,45 @@ function fmtDataHora(iso?: string | null) {
 }
 
 /** Botão da Lixeira com contador; some o número quando está vazia. */
-export function BotaoLixeira(props: { companyId: string | null; onClick: () => void; className?: string; compacto?: boolean }) {
+export function BotaoLixeira(props: { companyId: string | null; onClick: () => void; className?: string; icone?: boolean }) {
   const { data } = useDocLixeira(props.companyId);
   const total = data?.length ?? 0;
   const rotulo = total > 0 ? `Lixeira (${total})` : "Lixeira";
+  const ariaLabel = total > 0 ? `Lixeira, ${total} documento${total > 1 ? "s" : ""} para restaurar` : "Lixeira";
+  if (props.icone) {
+    // Ícone no topo (celular), ao lado de Lotes; o número vira um selo no canto.
+    return (
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        onClick={props.onClick}
+        aria-label={ariaLabel}
+        title="Lixeira: documentos excluídos nos últimos 7 dias"
+        className={props.className ?? "relative h-11 w-11 shrink-0 rounded-xl text-muted-foreground"}
+      >
+        <Trash2 className="h-4 w-4" aria-hidden="true" />
+        {total > 0 && (
+          <span
+            className="absolute right-1 top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[10px] font-semibold leading-none text-primary-foreground tabular-nums"
+            aria-hidden="true"
+          >
+            {total > 99 ? "99+" : total}
+          </span>
+        )}
+      </Button>
+    );
+  }
   return (
     <Button
       variant="outline"
       onClick={props.onClick}
-      aria-label={total > 0 ? `Lixeira, ${total} documento${total > 1 ? "s" : ""} para restaurar` : "Lixeira"}
+      aria-label={ariaLabel}
       title="Documentos excluídos nos últimos 7 dias"
       className={props.className ?? "gap-2 px-3 sm:px-4"}
     >
       <Trash2 className="h-4 w-4" />
-      {props.compacto ? (total > 0 ? <span className="tabular-nums">{total}</span> : null) : <span>{rotulo}</span>}
+      <span>{rotulo}</span>
     </Button>
   );
 }

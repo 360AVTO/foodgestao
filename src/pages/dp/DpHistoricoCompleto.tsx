@@ -383,7 +383,16 @@ function ColunaFiltroHeader(props: {
   );
 }
 
-export default function DpHistoricoCompleto({ embutido = false }: { embutido?: boolean }) {
+export default function DpHistoricoCompleto({
+  embutido = false,
+  lixeiraAberta: lixeiraAbertaExterna,
+  onLixeiraAbertaChange,
+}: {
+  embutido?: boolean;
+  /** Quando a tela-mãe controla a Lixeira (atalho no topo, no celular). */
+  lixeiraAberta?: boolean;
+  onLixeiraAbertaChange?: (aberta: boolean) => void;
+}) {
 
   const navigate = useNavigate();
   const { selectedCompanyId } = useCompanyContext();
@@ -430,7 +439,12 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
   }, [preview]);
   const [detalhe, setDetalhe] = useState<UnifiedDoc | null>(null);
   const [logAberto, setLogAberto] = useState(false);
-  const [lixeiraAberta, setLixeiraAberta] = useState(false);
+  const [lixeiraAbertaInterna, setLixeiraAbertaInterna] = useState(false);
+  const lixeiraAberta = lixeiraAbertaExterna ?? lixeiraAbertaInterna;
+  const setLixeiraAberta = (v: boolean) => {
+    setLixeiraAbertaInterna(v);
+    onLixeiraAbertaChange?.(v);
+  };
   const [excluir, setExcluir] = useState<UnifiedDoc | null>(null);
   const [motivoExclusao, setMotivoExclusao] = useState("");
   const [excluindo, setExcluindo] = useState(false);
@@ -1045,12 +1059,6 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
             </span>
             <ChevronDown className={`h-4 w-4 transition-transform ${filtrosAbertos ? "rotate-180" : ""}`} />
           </Button>
-          <BotaoLixeira
-            compacto
-            companyId={selectedCompanyId ?? null}
-            onClick={() => setLixeiraAberta(true)}
-            className="min-h-10 shrink-0 gap-1.5 px-3"
-          />
           <Select value={ordemMobile} onValueChange={aplicarOrdemMobile}>
             <SelectTrigger className="min-h-10 min-w-0 flex-1">
               <span className="flex min-w-0 items-center gap-2 truncate whitespace-nowrap">
