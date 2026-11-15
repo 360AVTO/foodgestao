@@ -47,6 +47,8 @@ import { DocSubstituirDialog, type DocSubstituirTarget } from "@/components/dp/d
 import { DocDetalhesDialog } from "@/components/dp/documentos/DocDetalhesDialog";
 import { AtestadoResumo } from "@/components/dp/documentos/AtestadoResumo";
 import { DocEventosDialog } from "@/components/dp/documentos/DocEventosDialog";
+import { BotaoLixeira, DocLixeiraDialog, lixeiraQueryKey } from "@/components/dp/documentos/DocLixeiraDialog";
+import { LIXEIRA_DIAS } from "@/lib/dp/documentos-lixeira";
 import { Textarea } from "@/components/ui/textarea";
 import { docSourceConfig, excluirDocumentoHistorico } from "@/lib/dp/historicoDocAcoes";
 import { DpTableColumnHeader } from "@/components/dp/DpTableColumnHeader";
@@ -428,6 +430,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
   }, [preview]);
   const [detalhe, setDetalhe] = useState<UnifiedDoc | null>(null);
   const [logAberto, setLogAberto] = useState(false);
+  const [lixeiraAberta, setLixeiraAberta] = useState(false);
   const [excluir, setExcluir] = useState<UnifiedDoc | null>(null);
   const [motivoExclusao, setMotivoExclusao] = useState("");
   const [excluindo, setExcluindo] = useState(false);
@@ -874,7 +877,13 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
     queryClient.invalidateQueries({ queryKey: ["dp_historico_unified"] });
     queryClient.invalidateQueries({ queryKey: ["dp_doc_consistencia_janela"] });
     queryClient.invalidateQueries({ queryKey: ["dp_documentos"] });
+    queryClient.invalidateQueries({ queryKey: lixeiraQueryKey(selectedCompanyId ?? null) });
+    queryClient.invalidateQueries({ queryKey: ["dp_doc_eventos_empresa"] });
   };
+
+  // Só o acervo do DP vai para a Lixeira; as demais origens têm rotina própria.
+  const origemExcluir = excluir ? excluir.id.split(":")[0] : null;
+  const vaiParaLixeira = origemExcluir === "doc";
 
   const confirmarExclusao = async () => {
     if (!excluir) return;
@@ -891,7 +900,11 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
         unidade_nome: excluir.unidade_nome,
         motivo: motivoExclusao.trim() || null,
       });
-      toast.success("Documento excluído. A pendência voltará a aparecer na Conferência.");
+      toast.success(
+        vaiParaLixeira
+          ? `Documento movido para a Lixeira. Você pode restaurá-lo em até ${LIXEIRA_DIAS} dias.`
+          : "Documento excluído. A pendência voltará a aparecer na Conferência.",
+      );
       setExcluir(null);
       setMotivoExclusao("");
       recarregar();
@@ -974,10 +987,15 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
     </Button>
   );
 
+  const botaoLixeira = (
+    <BotaoLixeira companyId={selectedCompanyId ?? null} onClick={() => setLixeiraAberta(true)} />
+  );
+
   const acoesCabecalho = (
     <>
       {acoesTabelaDesktop}
       {botaoRegistro}
+      {botaoLixeira}
     </>
   );
 
@@ -1001,7 +1019,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
           <Button variant="ghost" size="sm" className="shrink-0 sm:ml-auto" onClick={limpar}>Limpar</Button>
           {embutido && (
             <div className="flex shrink-0 items-center gap-2">
-              <div className="hidden items-center gap-2 md:flex">{acoesTabelaDesktop}{botaoRegistro}</div>
+              <div className="hidden items-center gap-2 md:flex">{acoesTabelaDesktop}{botaoRegistro}{botaoLixeira}</div>
             </div>
           )}
         </div>
@@ -1011,7 +1029,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
           <Button
             variant="outline"
             size="sm"
-            className="min-h-10 flex-1 justify-between"
+            className="min-h-10 min-w-0 flex-1 justify-between"
             aria-expanded={filtrosAbertos}
             onClick={() => {
               const proximo = !filtrosAbertos;
@@ -1027,9 +1045,15 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
             </span>
             <ChevronDown className={`h-4 w-4 transition-transform ${filtrosAbertos ? "rotate-180" : ""}`} />
           </Button>
+          <BotaoLixeira
+            compacto
+            companyId={selectedCompanyId ?? null}
+            onClick={() => setLixeiraAberta(true)}
+            className="min-h-10 shrink-0 gap-1.5 px-3"
+          />
           <Select value={ordemMobile} onValueChange={aplicarOrdemMobile}>
-            <SelectTrigger className="min-h-10 flex-1">
-              <span className="flex items-center gap-2 truncate">
+            <SelectTrigger className="min-h-10 min-w-0 flex-1">
+              <span className="flex min-w-0 items-center gap-2 truncate whitespace-nowrap">
                 <ArrowDownUp className="h-4 w-4 shrink-0" />
                 <SelectValue />
               </span>
@@ -1436,20 +1460,40 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
         onOpenChange={setLogAberto}
       />
 
+      <DocLixeiraDialog
+        open={lixeiraAberta}
+        companyId={selectedCompanyId ?? null}
+        onOpenChange={setLixeiraAberta}
+        onRestaurado={recarregar}
+      />
+
 
       <AlertDialog open={!!excluir} onOpenChange={(v) => { if (!v) { setExcluir(null); setMotivoExclusao(""); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir Documento?</AlertDialogTitle>
+            <AlertDialogTitle>{vaiParaLixeira ? "Mover Documento para a Lixeira?" : "Excluir Documento?"}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
                 <p>
                   {excluir ? `${docSourceConfig(excluir.id).label} · ${excluir.tipo_label} · ${excluir.colaborador_nome} · ${excluir.competencia}` : ""}
                 </p>
-                <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
-                  O arquivo será apagado definitivamente e a pendência deste documento voltará a
-                  aparecer na Conferência de Competências. A exclusão fica registrada no log.
-                </p>
+                {vaiParaLixeira ? (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                    O documento sai da lista, mas fica guardado na Lixeira por {LIXEIRA_DIAS} dias e pode
+                    ser restaurado nesse período. Enquanto estiver na Lixeira, a pendência dele volta a
+                    aparecer na Conferência de Competências. A exclusão fica registrada no log.
+                  </p>
+                ) : origemExcluir === "sind" ? (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                    O arquivo será apagado definitivamente e não vai para a Lixeira. A exclusão fica
+                    registrada no log.
+                  </p>
+                ) : (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                    Este registro sai da lista e não vai para a Lixeira. O arquivo e o histórico ficam
+                    guardados e a exclusão fica registrada no log.
+                  </p>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1469,7 +1513,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
               onClick={(e) => { e.preventDefault(); confirmarExclusao(); }}
               disabled={excluindo}
             >
-              {excluindo ? "Excluindo…" : "Excluir"}
+              {excluindo ? "Excluindo…" : vaiParaLixeira ? "Mover para a Lixeira" : "Excluir"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

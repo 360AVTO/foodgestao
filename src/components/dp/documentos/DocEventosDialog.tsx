@@ -9,6 +9,7 @@ import { Badge } from "@/components/ui/badge";
 const ACOES_LABEL: Record<string, string> = {
   excluido: "Excluído",
   substituido: "Substituído",
+  restaurado: "Restaurado da Lixeira",
 };
 
 function fmtDataHora(iso?: string | null) {
@@ -75,7 +76,7 @@ export function DocEventosDialog(props: {
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge
                     variant="outline"
-                    className={e.acao === "excluido" ? "border-rose-300 text-rose-700" : "border-amber-300 text-amber-700"}
+                    className={e.acao === "excluido" ? "border-rose-300 text-rose-700" : e.acao === "restaurado" ? "border-primary/40 text-primary" : "border-amber-300 text-amber-700"}
                   >
                     {ACOES_LABEL[e.acao] ?? e.acao}
                   </Badge>

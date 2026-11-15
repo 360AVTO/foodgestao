@@ -20576,6 +20576,10 @@ export type Database = {
         Args: { _company_id: string }
         Returns: number
       }
+      dp_documento_restaurar: {
+        Args: { p_documento_id: string }
+        Returns: Json
+      }
       dp_documento_revisar: {
         Args: { p_documento_id: string; p_motivo?: string; p_status: string }
         Returns: boolean
@@ -20592,6 +20596,27 @@ export type Database = {
       dp_documento_versao_publicar: {
         Args: { _anterior_id?: string; _motivo?: string; _novo_id: string }
         Returns: boolean
+      }
+      dp_documentos_lixeira: {
+        Args: { p_company_id: string }
+        Returns: {
+          arquivado_em: string
+          arquivado_por: string
+          arquivado_por_nome: string
+          arquivamento_motivo: string
+          colaborador_id: string
+          colaborador_nome: string
+          file_name: string
+          file_path: string
+          id: string
+          mime_type: string
+          referencia_data: string
+          restaurar_ate: string
+          tipo: string
+          titulo: string
+          unidade_id: string
+          unidade_nome: string
+        }[]
       }
       dp_dsr_ciencia_registrar: {
         Args: {
