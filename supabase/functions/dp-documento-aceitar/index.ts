@@ -3,7 +3,8 @@
  *
  * O cliente envia apenas o identificador do documento. O servidor:
  *  1. valida o token de quem pediu;
- *  2. confere o colaborador ativo ligado a esse usuário (regra do portal);
+ *  2. confere o colaborador ligado a esse usuário que ainda pode assinar
+ *     (ativo, aviso após o último dia ou desligado dentro do prazo de acesso);
  *  3. confere que o documento é daquele colaborador e daquela empresa;
  *  4. lê os bytes do arquivo no armazenamento privado e calcula o SHA-256;
  *  5. chama a operação de banco que valida tudo novamente e grava o aceite
@@ -26,7 +27,7 @@ const Body = z.object({ documento_id: z.string().uuid(), assinatura: z.string().
 
 const FRASES: Record<string, { status: number; frase: string }> = {
   nao_autenticado: { status: 401, frase: "Sessão expirada. Entre novamente." },
-  sem_acesso_portal: { status: 403, frase: "Seu acesso não permite assinar documentos agora." },
+  sem_acesso_portal: { status: 403, frase: "Seu acesso ao portal não permite assinar documentos agora. Fale com o setor de pessoas." },
   documento_indisponivel: { status: 403, frase: "Este documento não está disponível para você." },
   documento_de_outro_colaborador: { status: 403, frase: "Este documento não está disponível para você." },
   documento_de_outra_empresa: { status: 403, frase: "Este documento não está disponível para você." },
@@ -60,8 +61,9 @@ Deno.serve(async (req) => {
     const cliente = callerClient(caller.token);
     const admin = serviceClient();
 
-    // Colaborador ativo do usuário logado — derivado no servidor.
-    const { data: colabId } = await cliente.rpc("dp_colaborador_ativo_of", { _user_id: caller.id });
+    // Colaborador do usuário logado que pode assinar — derivado no servidor.
+    // Desligado dentro do prazo de acesso ainda assina o que ficou pendente.
+    const { data: colabId } = await cliente.rpc("dp_colaborador_assinatura_of", { _user_id: caller.id });
     if (!colabId) return erro(403, FRASES.sem_acesso_portal.frase);
 
     const { data: doc } = await admin

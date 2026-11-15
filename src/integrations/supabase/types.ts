@@ -19672,6 +19672,10 @@ export type Database = {
         }
         Returns: string
       }
+      dp_colaborador_assinatura_of: {
+        Args: { _user_id: string }
+        Returns: string
+      }
       dp_colaborador_ativo_of: { Args: { _user_id: string }; Returns: string }
       dp_colaborador_beneficio_definir: {
         Args: { p_dados: Json; p_id?: string }
