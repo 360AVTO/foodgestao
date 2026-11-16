@@ -227,7 +227,7 @@ jobs:
       - name: Supabase CLI
         uses: supabase/setup-cli@v1
         with:
-          version: latest
+          version: 3.1.0
 
       - name: Migrations em sincronia (dry-run)
         env:
