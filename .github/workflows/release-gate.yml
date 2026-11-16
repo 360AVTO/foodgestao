@@ -81,6 +81,9 @@ jobs:
           cache: "npm"
       - run: npm ci --no-audit --no-fund
       - name: Vitest
+        env:
+          TEST_SUPABASE_URL: ${{ secrets.TEST_SUPABASE_URL }}
+          TEST_SUPABASE_ANON_KEY: ${{ secrets.TEST_SUPABASE_ANON_KEY }}
         run: npm test
 
   tenancy:

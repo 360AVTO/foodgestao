@@ -29,7 +29,12 @@ SMOKE_BASE_URL                 SMOKE_SUPABASE_URL   SMOKE_SUPABASE_ANON_KEY
 SMOKE_PLAN_SLUG (opcional)     SMOKE_USER_EMAIL/_PASSWORD (opcional)
 ```
 
-`RESTORE_DB_URL` é fornecido pelo serviço `postgres:15` do próprio job — não é
+`STAGING_SUPABASE_DB_URL` é a conexão PostgreSQL de homologação usada pelo
+Release Gate, Staging Security Gate e Security Lint. Após trocar a senha
+do banco, atualize esse secret e as conexões PostgreSQL locais ou externas
+que usam a mesma conta. As chaves de API de teste são configuradas à parte.
+
+`RESTORE_DB_URL` é fornecido pelo serviço `postgres:17` do próprio job — não é
 secret.
 
 ## Rodando localmente

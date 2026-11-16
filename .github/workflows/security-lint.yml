@@ -30,14 +30,14 @@ jobs:
 
       - name: Verify database secret
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
         run: |
           if [ -z "$SUPABASE_DB_URL" ]; then
-            echo "::error::NÃO EXECUTADO — SUPABASE_DB_URL (homologação) ausente."
+            echo "::error::NÃO EXECUTADO — STAGING_SUPABASE_DB_URL ausente."
             exit 1
           fi
 
       - name: Run security linter (CI strict)
         env:
-          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          SUPABASE_DB_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
         run: node scripts/security-lint.mjs --ci --strict --require
