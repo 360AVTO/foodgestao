@@ -29,6 +29,8 @@ export type DadosTermoGestor = {
   cnpj?: string | null; cpf?: string | null; cargo?: string | null; unidade?: string | null; matricula?: string | null;
   emitidoPor?: string | null;
   trocaEntrePessoas?: boolean;
+  /** Nome civil da(s) outra(s) parte(s) da permuta (nunca o vínculo). */
+  contraparte?: string | null;
   /** Escala 12x36: a troca deixa plantões de 12h em dias seguidos, a pedido do(a) empregado(a). */
   plantoesSeguidos12x36?: { data_plantao: string; data_vizinha: string }[];
 };
@@ -36,10 +38,11 @@ export type DadosTermoGestor = {
 export function termoTrocaGestorParagrafos(d: DadosTermoGestor): string[] {
   if (d.trocaEntrePessoas) {
     const seguidos = d.plantoesSeguidos12x36 ?? [];
+    const com = d.contraparte ? ` com ${d.contraparte}` : "";
     const itens = [
-      `Alteração pontual. A folga de ${br(d.dataFixa)} passa a ser dia de trabalho; o descanso será concedido em ${br(d.dataNova)}, sem alteração permanente das folgas contratuais.`,
-      "Registro. A alteração foi autorizada pelo gestor. Esta autorização não representa assinatura ou consentimento do(a) empregado(a).",
-      "Descanso. Permanecem exigíveis os limites legais de jornada e descanso e as disposições coletivas aplicáveis. A assinatura não afasta essas obrigações.",
+      `Permuta de escala. Em razão de permuta de escala acordada${com}, a folga de ${br(d.dataFixa)} passa a ser dia normal de trabalho e o descanso passa a ser concedido em ${br(d.dataNova)}, sem prejuízo da remuneração e sem alteração permanente das folgas contratuais.`,
+      "Livre e espontânea vontade. Declaro que a permuta foi solicitada por minha livre e espontânea vontade, no meu interesse pessoal e em comum acordo com a outra parte, com anuência do empregador.",
+      "Trabalho consecutivo. Estou ciente de que poderá haver mais de 6 (seis) dias consecutivos de trabalho antes do descanso semanal remunerado (Art. 67 da CLT e Lei 605/1949), o que aceito expressamente, por não decorrer de imposição do empregador.",
     ];
     if (seguidos.length > 0) {
       const dias = [...new Set(seguidos.flatMap((s) => [s.data_plantao, s.data_vizinha]))].sort().map(br).join(" e ");
@@ -48,8 +51,9 @@ export function termoTrocaGestorParagrafos(d: DadosTermoGestor): string[] {
       );
     }
     itens.push(
-      "Demais condições. Permanecem inalteradas a remuneração e as demais condições contratuais.",
-      "Ciência. Ao assinar, o(a) empregado(a) declara ter lido a alteração das datas de sua própria folga.",
+      "Faltas. A ausência injustificada no dia que passou a ser de trabalho será tratada como falta, com os descontos e reflexos legais (DSR, férias e benefícios).",
+      "Demais condições. Permanecem inalteradas todas as demais cláusulas do contrato de trabalho, inclusive jornada, salário e benefícios.",
+      "Ciência e aceite. Declaro que li este termo e concordo integralmente com seu conteúdo.",
     );
     return itens.map((t, i) => `${i + 1}. ${t}`);
   }
@@ -160,19 +164,13 @@ export async function termoTrocaGestorPdf(p: DadosTermoGestor, manual: boolean, 
   return pdf.save();
 }
 
-/** Gera o termo, guarda na ficha e (digital) envia ao Portal para aceite. Manual: devolve o PDF para impressão. */
-export async function emitirTermoTrocaGestor(input: {
-  companyId: string; colaboradorId: string; empresa: string; nome: string;
-  dataFixa: string; dataNova: string; origem: OrigemTrocaGestor; motivo?: string | null;
-  folgaFixa: boolean; consomeVaga?: boolean; assinatura: AssinaturaTermo;
-}): Promise<Uint8Array> {
-  const manual = input.assinatura === "manual";
-  // Dados complementares (best-effort; o termo sai mesmo se algo faltar).
+/** CPF, cargo, unidade, matrícula, CNPJ e emissor para o cabeçalho do termo (best-effort). */
+export async function carregarDadosComplementaresTroca(companyId: string, colaboradorId: string): Promise<Partial<DadosTermoGestor>> {
   const extra: Partial<DadosTermoGestor> = {};
   try {
     const [{ data: col }, { data: emp }, { data: u }] = await Promise.all([
-      (supabase as any).from("dp_colaboradores").select("matricula, cargo, cargo_ref:dp_cargos(nome), unidade:dp_unidades(nome)").eq("id", input.colaboradorId).maybeSingle(),
-      (supabase as any).from("companies").select("cnpj").eq("id", input.companyId).maybeSingle(),
+      (supabase as any).from("dp_colaboradores").select("matricula, cargo, cargo_ref:dp_cargos(nome), unidade:dp_unidades(nome)").eq("id", colaboradorId).maybeSingle(),
+      (supabase as any).from("companies").select("cnpj").eq("id", companyId).maybeSingle(),
       supabase.auth.getUser(),
     ]);
     extra.matricula = col?.matricula ?? null;
@@ -181,9 +179,20 @@ export async function emitirTermoTrocaGestor(input: {
     extra.cnpj = emp?.cnpj ?? null;
     extra.emitidoPor = (u?.user?.user_metadata as any)?.full_name ?? u?.user?.email ?? null;
     const { buscarConfidencial } = await import("@/lib/dp/confidencial");
-    const c = (await buscarConfidencial(input.companyId, [input.colaboradorId])).get(input.colaboradorId);
+    const c = (await buscarConfidencial(companyId, [colaboradorId])).get(colaboradorId);
     if (c?.liberado) extra.cpf = (c.cpf as string) ?? null;
   } catch { /* segue sem os complementos */ }
+  return extra;
+}
+
+/** Gera o termo, guarda na ficha e (digital) envia ao Portal para aceite. Manual: devolve o PDF para impressão. */
+export async function emitirTermoTrocaGestor(input: {
+  companyId: string; colaboradorId: string; empresa: string; nome: string;
+  dataFixa: string; dataNova: string; origem: OrigemTrocaGestor; motivo?: string | null;
+  folgaFixa: boolean; consomeVaga?: boolean; assinatura: AssinaturaTermo;
+}): Promise<Uint8Array> {
+  const manual = input.assinatura === "manual";
+  const extra = await carregarDadosComplementaresTroca(input.companyId, input.colaboradorId);
   const bytes = await termoTrocaGestorPdf({ ...input, ...extra }, manual);
   const nome = `termo-alteracao-folga-${input.dataFixa}.pdf`;
   const path = `${input.companyId}/${input.colaboradorId}/${Date.now()}-${nome}`;

@@ -2,7 +2,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { invalidarRotina } from "@/lib/dp/rotina-cache";
 import { argsTrocaGestor, participantesComTermo, plantoesSeguidosDe, type TrocaGestorInput, type TrocaGestorPrevia } from "@/lib/dp/troca-gestor";
-import { termoTrocaGestorPdf } from "@/lib/dp/termo-troca-gestor";
+import { carregarDadosComplementaresTroca, termoTrocaGestorPdf } from "@/lib/dp/termo-troca-gestor";
 import { useRef } from "react";
 
 const rpc = supabase.rpc.bind(supabase) as unknown as (name: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
@@ -28,8 +28,10 @@ export function useRegistrarTrocaGestor() {
       if (!previa.participantes) throw new Error("Não foi possível conferir quem assinará os termos. Tente novamente.");
       for (const p of participantesComTermo(previa.participantes)) {
         if (arquivos.some(a => a.colaborador_id === p.colaborador_id)) continue;
-        // Only the participant's civil name and dates; internal reasons may mention the colleague.
-        const bytes = await termoTrocaGestorPdf({ empresa: p.empresa, nome: p.nome, dataFixa: p.data_original, dataNova: p.data_nova, origem: "empresa", folgaFixa: false, trocaEntrePessoas: true, plantoesSeguidos12x36: plantoesSeguidosDe(previa.riscos_12x36, p.colaborador_id) }, false);
+        // Civil names only; the internal reason never enters the term. Origin: requested by the employees.
+        const extra = await carregarDadosComplementaresTroca(input.companyId, p.colaborador_id);
+        const contraparte = previa.participantes.filter(o => o.colaborador_id !== p.colaborador_id).map(o => o.nome).join(" e ") || null;
+        const bytes = await termoTrocaGestorPdf({ ...extra, empresa: p.empresa, nome: p.nome, contraparte, dataFixa: p.data_original, dataNova: p.data_nova, origem: "colaborador", folgaFixa: false, trocaEntrePessoas: true, plantoesSeguidos12x36: plantoesSeguidosDe(previa.riscos_12x36, p.colaborador_id) }, false);
         const file_path = `${input.companyId}/${p.colaborador_id}/trocas/${requisicao}/termo-alteracao-folga-${p.data_original}.pdf`;
         const blob = new Blob([bytes as BlobPart], { type: "application/pdf" });
         const { error } = await supabase.storage.from("dp-documentos").upload(file_path, blob, { contentType: "application/pdf", upsert: false });

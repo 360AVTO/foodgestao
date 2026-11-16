@@ -21,3 +21,15 @@ describe("termos individuais de troca do gestor", () => {
     expect(paragrafos.join(" ")).not.toContain("Verônica");
   });
 });
+describe("termo de permuta entre colegas", () => {
+  const t = termoTrocaGestorParagrafos({ empresa: "E", nome: "Hanna", contraparte: "Cristiane Martins", dataFixa: "2026-11-12", dataNova: "2026-11-11", origem: "colaborador", folgaFixa: false, trocaEntrePessoas: true }).join(" ");
+  it("cita a contraparte e o Art. 67", () => {
+    expect(t).toContain("Cristiane Martins");
+    expect(t).toContain("Art. 67");
+    expect(t).toContain("livre e espontânea vontade");
+  });
+  it("não anula a assinatura nem cita freelancer", () => {
+    expect(t).not.toContain("não representa assinatura");
+    expect(t.toLowerCase()).not.toContain("freelancer");
+  });
+});
