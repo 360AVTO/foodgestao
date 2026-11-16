@@ -7,6 +7,9 @@ function fail(message) {
 
 const value = process.env.STAGING_SUPABASE_DB_URL;
 if (!value?.trim()) fail("secret ausente.");
+if (/\b(?:Set-Clipboard|Read-Host|EscapeDataString)\b/.test(value) && !/^postgres(?:ql)?:\/\//.test(value)) {
+  fail("o secret contém o comando PowerShell. Execute o comando e cole somente a URI gerada.");
+}
 if (/your-password/i.test(value)) fail("substitua o marcador [YOUR-PASSWORD] pela senha do banco.");
 if (/\s/.test(value)) fail("cole a URL em uma linha, sem espaços. Codifique os espaços da senha como %20.");
 if (value.includes("#")) fail("codifique o caractere # da senha como %23.");
