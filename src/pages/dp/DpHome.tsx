@@ -4,6 +4,7 @@ import { LayoutDashboard, Settings } from "lucide-react";
 import { Link } from "react-router-dom";
 import { CalendarioOperacaoResumo } from "@/components/dp/home/CalendarioOperacaoResumo";
 import { AtalhosFavoritos } from "@/components/dp/home/AtalhosFavoritos";
+import { useCompanyContext } from "@/hooks/useCompanyContext";
 import { KpiCards } from "@/components/dp/home/KpiCards";
 import { MenusPrincipaisCards } from "@/components/dp/home/MenusPrincipaisCards";
 import { PontoConformidadeAlerta } from "@/components/dp/PontoConformidadeAlerta";
@@ -16,9 +17,11 @@ import { VerMenuCompleto } from "@/components/mobile/VerMenuCompleto";
 import { ImportarDocumentoAtalho } from "@/components/dp/home/ImportarDocumentoAtalho";
 import { AcoesDoDiaCard } from "@/components/dp/home/AcoesDoDiaCard";
 import { AniversariantesCard } from "@/components/dp/home/AniversariantesCard";
+import { DpPrimeirosPassosCard } from "@/components/dp/home/DpPrimeirosPassosCard";
 
 export default function DpHome() {
   const isMobile = useIsMobile();
+  const { selectedCompanyId } = useCompanyContext();
   useMenuSwipeVertical();
 
   return (
@@ -43,6 +46,7 @@ export default function DpHome() {
         }
       />
 
+      <DpPrimeirosPassosCard />
       <AvisosGestorGate />
       <PontoConformidadeAlerta />
 

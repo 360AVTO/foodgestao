@@ -89,12 +89,13 @@ function validateEmpresa(d: EmpresaFormData): Partial<Record<keyof EmpresaFormDa
 export default function Onboarding() {
   const { user } = useAuth();
   const navigate = useNavigate();
-  const { setContext } = useCompanyContext();
+  const { setContext, refreshCompanies } = useCompanyContext();
   const submit = useOnboardingSubmit();
 
   const [step, setStep] = useState<1 | 2 | 3>(1);
   const [empresa, setEmpresa] = useState<EmpresaFormData>(EMPTY_EMPRESA);
   const [modulos, setModulos] = useState<string[]>([]);
+  const [criarUnidade, setCriarUnidade] = useState(true);
   const [errors, setErrors] = useState<Partial<Record<keyof EmpresaFormData, string>>>({});
   const [cnpjPending, setCnpjPending] = useState(false);
   const [cnpjChecking, setCnpjChecking] = useState(false);
@@ -113,6 +114,32 @@ export default function Onboarding() {
       emailEmpresa: d.emailEmpresa || user.email || "",
     }));
   }, [user]);
+
+  // Rascunho no aparelho: se a tela fechar ou o sinal cair, o cadastro volta de onde parou.
+  const RASCUNHO_KEY = "aveto:onboarding-rascunho";
+  const [rascunhoLido, setRascunhoLido] = useState(false);
+  useEffect(() => {
+    if (!user || rascunhoLido) return;
+    setRascunhoLido(true);
+    try {
+      const r = JSON.parse(localStorage.getItem(RASCUNHO_KEY) || "null");
+      if (!r || r.userId !== user.id) return;
+      setEmpresa((d) => ({ ...d, ...r.empresa, aceitouLgpd: false }));
+      if (Array.isArray(r.modulos)) setModulos(r.modulos);
+      if (typeof r.criarUnidade === "boolean") setCriarUnidade(r.criarUnidade);
+      if (r.step === 2) setStep(2);
+      toast.info("Continuamos de onde você parou.");
+    } catch { /* rascunho inválido: ignora */ }
+  }, [user, rascunhoLido]);
+  useEffect(() => {
+    if (!user || !rascunhoLido || step === 3) return;
+    try {
+      const { aceitouLgpd: _a, ...resto } = empresa;
+      localStorage.setItem(RASCUNHO_KEY, JSON.stringify({ userId: user.id, empresa: resto, modulos, criarUnidade, step }));
+    } catch { /* sem armazenamento */ }
+  }, [user, rascunhoLido, empresa, modulos, criarUnidade, step]);
+
+  const meuWhatsapp = String(user?.user_metadata?.whatsapp ?? "").replace(/\D/g, "").replace(/^55(?=\d{10,11}$)/, "");
 
   const updateEmpresa = (patch: Partial<EmpresaFormData>) => {
     setEmpresa((d) => ({ ...d, ...patch }));
@@ -186,8 +213,9 @@ export default function Onboarding() {
       const res = await submit.mutateAsync({
         nomeCompleto: empresa.nomeCompleto,
         emailCliente: empresa.emailEmpresa,
-        telefoneCliente: empresa.telefoneEmpresa,
-        whatsappCliente: empresa.whatsappEmpresa,
+        // Contato pessoal de quem cadastra = o WhatsApp confirmado no cadastro, nunca os telefones da empresa.
+        telefoneCliente: "",
+        whatsappCliente: meuWhatsapp,
         cnpj: empresa.cnpj,
         razaoSocial: empresa.razaoSocial,
         nomeFantasia: empresa.nomeFantasia,
@@ -203,6 +231,7 @@ export default function Onboarding() {
         whatsappEmpresa: empresa.whatsappEmpresa,
         emailEmpresa: empresa.emailEmpresa,
         modulosSlugs: modulos,
+        criarUnidade: criarUnidade && modulos.includes("dp"),
       });
 
       // Marca onboarding concluído no profile
@@ -210,6 +239,7 @@ export default function Onboarding() {
         await marcarOnboardingConcluido(user.id);
       }
 
+      try { localStorage.removeItem("aveto:onboarding-rascunho"); } catch { /* ignora */ }
       setResult(res);
       setStep(3);
     } catch (err) {
@@ -227,11 +257,12 @@ export default function Onboarding() {
     }
   };
 
-  const handleAcessarPainel = () => {
+  const handleAcessarPainel = async (destino = "/") => {
     if (result?.company_id) {
+      try { await refreshCompanies(); } catch { /* segue */ }
       setContext("pj", result.company_id);
     }
-    navigate("/");
+    navigate(destino, { replace: true });
   };
 
   const requestExit = () => {
@@ -241,6 +272,7 @@ export default function Onboarding() {
 
   const handleExit = async () => {
     setExiting(true);
+    try { localStorage.removeItem(RASCUNHO_KEY); } catch { /* ignora */ }
     try {
       await supabase.auth.signOut();
     } catch (error) {
@@ -271,6 +303,7 @@ export default function Onboarding() {
               setCnpjPending={setCnpjPending}
               cnpjInactive={cnpjInactive}
               setCnpjInactive={setCnpjInactive}
+              meuWhatsapp={meuWhatsapp}
             />
             <div className="mt-6 md:mt-8 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
               <Button type="button" variant="ghost" onClick={requestExit} className="w-full sm:w-auto min-h-10">
@@ -295,7 +328,12 @@ export default function Onboarding() {
 
         {step === 2 && (
           <>
-            <StepModulos selectedSlugs={modulos} onToggle={toggleModulo} />
+            <StepModulos
+              selectedSlugs={modulos}
+              onToggle={toggleModulo}
+              criarUnidade={criarUnidade}
+              onCriarUnidadeChange={setCriarUnidade}
+            />
             <div className="mt-6 md:mt-8 flex flex-col-reverse sm:flex-row items-stretch sm:items-center justify-between gap-2 sm:gap-3">
               <Button variant="ghost" onClick={() => setStep(1)} disabled={submit.isPending} className="w-full sm:w-auto min-h-10">
                 <ArrowLeft className="mr-2 h-4 w-4" />
@@ -325,8 +363,9 @@ export default function Onboarding() {
             nomeFantasia={empresa.nomeFantasia}
             razaoSocial={empresa.razaoSocial}
             modulosSlugs={modulos}
+            lojaCriada={criarUnidade && modulos.includes("dp")}
             trialTerminaEm={result.trial_termina_em}
-            onContinuar={handleAcessarPainel}
+            onContinuar={(d) => void handleAcessarPainel(d)}
           />
         )}
       </OnboardingShell>

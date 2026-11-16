@@ -47,6 +47,8 @@ import { DocSubstituirDialog, type DocSubstituirTarget } from "@/components/dp/d
 import { DocDetalhesDialog } from "@/components/dp/documentos/DocDetalhesDialog";
 import { AtestadoResumo } from "@/components/dp/documentos/AtestadoResumo";
 import { DocEventosDialog } from "@/components/dp/documentos/DocEventosDialog";
+import { BotaoLixeira, DocLixeiraDialog, lixeiraQueryKey } from "@/components/dp/documentos/DocLixeiraDialog";
+import { LIXEIRA_DIAS } from "@/lib/dp/documentos-lixeira";
 import { Textarea } from "@/components/ui/textarea";
 import { docSourceConfig, excluirDocumentoHistorico } from "@/lib/dp/historicoDocAcoes";
 import { DpTableColumnHeader } from "@/components/dp/DpTableColumnHeader";
@@ -81,6 +83,8 @@ type UnifiedDoc = {
   aceite_em?: string | null;
   /** Validação digital dispensada porque o documento já veio assinado. */
   aceiteDispensado?: boolean;
+  /** Assinatura encerrada: colaborador desligado e prazo de 30 dias do portal vencido. */
+  aceiteEncerrado?: boolean;
   /** Documento de assinatura física: null = não se aplica. */
   viaFisica?: { path: string | null; mime: string | null; em: string | null } | null;
   rescisao_grupo_id?: string | null;
@@ -186,7 +190,7 @@ const ACOES_WIDTH = 96;
 
 
 function aceiteLabel(r: UnifiedDoc) {
-  if (r.aceite === null) return r.aceiteDispensado ? "Dispensado" : "—";
+  if (r.aceite === null) return r.aceiteEncerrado ? "Encerrado" : r.aceiteDispensado ? "Dispensado" : "—";
   return r.aceite ? "Aceito" : "Aguardando";
 }
 
@@ -221,6 +225,13 @@ function AssinaturaSelo({ r, longo }: { r: UnifiedDoc; longo?: boolean }) {
     ) : (
       <span className="inline-flex items-center whitespace-nowrap rounded-full border border-amber-300 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-800">
         Falta via assinada
+      </span>
+    );
+  }
+  if (r.aceiteEncerrado) {
+    return (
+      <span title="Colaborador desligado e prazo de 30 dias de acesso ao portal encerrado." className="inline-flex items-center whitespace-nowrap rounded-full border border-border px-2 py-0.5 text-[11px] font-medium text-muted-foreground">
+        {longo ? "Assinatura encerrada (desligado após 30 dias)" : "Encerrado"}
       </span>
     );
   }
@@ -372,7 +383,16 @@ function ColunaFiltroHeader(props: {
   );
 }
 
-export default function DpHistoricoCompleto({ embutido = false }: { embutido?: boolean }) {
+export default function DpHistoricoCompleto({
+  embutido = false,
+  lixeiraAberta: lixeiraAbertaExterna,
+  onLixeiraAbertaChange,
+}: {
+  embutido?: boolean;
+  /** Quando a tela-mãe controla a Lixeira (atalho no topo, no celular). */
+  lixeiraAberta?: boolean;
+  onLixeiraAbertaChange?: (aberta: boolean) => void;
+}) {
 
   const navigate = useNavigate();
   const { selectedCompanyId } = useCompanyContext();
@@ -414,11 +434,17 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
     setCertStatus("carregando");
     certificadoValidacaoPdf(preview.id.slice(4))
       .then((c) => { if (cancelado) c.revogar(); else { atual = c; setCertPreview(c); setCertStatus("idle"); } })
-      .catch((e) => { if (!cancelado) { setCertStatus("falhou"); toast.warning(e instanceof Error ? e.message : "Não foi possível carregar a validação digital. Mostrando o documento original."); } });
+      .catch((e) => { if (!cancelado) { setCertStatus("falhou"); toast.warning(e instanceof Error ? e.message : "Não foi possível carregar a assinatura eletrônica. Mostrando o documento original."); } });
     return () => { cancelado = true; atual?.revogar(); setCertPreview(null); };
   }, [preview]);
   const [detalhe, setDetalhe] = useState<UnifiedDoc | null>(null);
   const [logAberto, setLogAberto] = useState(false);
+  const [lixeiraAbertaInterna, setLixeiraAbertaInterna] = useState(false);
+  const lixeiraAberta = lixeiraAbertaExterna ?? lixeiraAbertaInterna;
+  const setLixeiraAberta = (v: boolean) => {
+    setLixeiraAbertaInterna(v);
+    onLixeiraAbertaChange?.(v);
+  };
   const [excluir, setExcluir] = useState<UnifiedDoc | null>(null);
   const [motivoExclusao, setMotivoExclusao] = useState("");
   const [excluindo, setExcluindo] = useState(false);
@@ -494,7 +520,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
         fetchAllPages<any>((from, to) =>
           supabase
             .from("dp_documentos")
-            .select("id, titulo, tipo, referencia_data, file_path, mime_type, created_at, colaborador_id, aprovacao_status, exige_aceite, assinatura_detectada, rescisao_grupo_id, comprovante_file_path, comprovante_mime_type, via_assinada_path, via_assinada_mime, via_assinada_em, assinatura_fisica, comprovante_modalidade, comprovante_valor_bancario_cents, comprovante_valor_especie_cents, comprovantes_extra_qtd, comprovantes_extra_cents, valor_liquido_cents, comprovante_recibo_documento_id")
+            .select("id, titulo, tipo, referencia_data, file_path, mime_type, created_at, colaborador_id, aprovacao_status, exige_aceite, assinatura_detectada, rescisao_grupo_id, comprovante_file_path, comprovante_mime_type, via_assinada_path, via_assinada_mime, via_assinada_em, assinatura_fisica, comprovante_modalidade, comprovante_valor_bancario_cents, comprovante_valor_especie_cents, comprovantes_extra_qtd, comprovantes_extra_cents, valor_liquido_cents, comprovante_recibo_documento_id, assinatura_dispensada_em")
             .eq("company_id", cId)
             // Excluídos (arquivados) saem da tela na hora; o banco preserva o histórico.
             .is("arquivado_em", null)
@@ -563,7 +589,8 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
           mime_type: d.mime_type,
           titulo: d.titulo,
           // Atestado é comprovante médico: nunca pede aceite da pessoa.
-          aceite: d.exige_aceite && d.tipo !== "atestado" ? aceitos.has(d.id) : null,
+          aceite: d.exige_aceite && d.tipo !== "atestado" ? (aceitos.has(d.id) ? true : d.assinatura_dispensada_em ? null : false) : null,
+          aceiteEncerrado: !!d.assinatura_dispensada_em && !aceitos.has(d.id),
           aceite_em: aceitoEm.get(d.id) ?? null,
           aceiteDispensado: !d.exige_aceite && d.assinatura_detectada === true && !docTipoAssinaturaFisica(d.tipo),
           viaFisica: !d.exige_aceite && (d.assinatura_fisica || docTipoAssinaturaFisica(d.tipo))
@@ -574,7 +601,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
           comprovante_recibo_id: d.comprovante_recibo_documento_id ?? null,
           comprovante_path: d.comprovante_file_path ?? null,
           comprovante_mime: d.comprovante_mime_type ?? null,
-          quitacao: d.comprovante_file_path
+          quitacao: d.comprovante_file_path || d.comprovante_recibo_documento_id || Number(d.comprovante_valor_especie_cents) > 0
             ? consolidarQuitacao({
                 liquidoCents: d.valor_liquido_cents,
                 temPrincipal: true,
@@ -654,6 +681,13 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
     });
     return Array.from(set).sort((a, b) => (a < b ? 1 : -1));
   }, [query.data]);
+  // O visualizador acompanha o registro atualizado da lista: depois de anexar
+  // o comprovante, o selo do topo muda na hora para quitado.
+  useEffect(() => {
+    if (!preview) return;
+    const atual = (query.data ?? []).find((r) => r.id === preview.id);
+    if (atual && atual !== preview) setPreviewRaw(atual);
+  }, [query.data, preview]);
 
   const arquivosPorRescisao = useMemo(() => {
     const contagem = new Map<string, number>();
@@ -857,7 +891,13 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
     queryClient.invalidateQueries({ queryKey: ["dp_historico_unified"] });
     queryClient.invalidateQueries({ queryKey: ["dp_doc_consistencia_janela"] });
     queryClient.invalidateQueries({ queryKey: ["dp_documentos"] });
+    queryClient.invalidateQueries({ queryKey: lixeiraQueryKey(selectedCompanyId ?? null) });
+    queryClient.invalidateQueries({ queryKey: ["dp_doc_eventos_empresa"] });
   };
+
+  // Só o acervo do DP vai para a Lixeira; as demais origens têm rotina própria.
+  const origemExcluir = excluir ? excluir.id.split(":")[0] : null;
+  const vaiParaLixeira = origemExcluir === "doc";
 
   const confirmarExclusao = async () => {
     if (!excluir) return;
@@ -874,7 +914,11 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
         unidade_nome: excluir.unidade_nome,
         motivo: motivoExclusao.trim() || null,
       });
-      toast.success("Documento excluído. A pendência voltará a aparecer na Conferência.");
+      toast.success(
+        vaiParaLixeira
+          ? `Documento movido para a Lixeira. Você pode restaurá-lo em até ${LIXEIRA_DIAS} dias.`
+          : "Documento excluído. A pendência voltará a aparecer na Conferência.",
+      );
       setExcluir(null);
       setMotivoExclusao("");
       recarregar();
@@ -957,10 +1001,15 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
     </Button>
   );
 
+  const botaoLixeira = (
+    <BotaoLixeira companyId={selectedCompanyId ?? null} onClick={() => setLixeiraAberta(true)} />
+  );
+
   const acoesCabecalho = (
     <>
       {acoesTabelaDesktop}
       {botaoRegistro}
+      {botaoLixeira}
     </>
   );
 
@@ -984,7 +1033,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
           <Button variant="ghost" size="sm" className="shrink-0 sm:ml-auto" onClick={limpar}>Limpar</Button>
           {embutido && (
             <div className="flex shrink-0 items-center gap-2">
-              <div className="hidden items-center gap-2 md:flex">{acoesTabelaDesktop}{botaoRegistro}</div>
+              <div className="hidden items-center gap-2 md:flex">{acoesTabelaDesktop}{botaoRegistro}{botaoLixeira}</div>
             </div>
           )}
         </div>
@@ -994,7 +1043,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
           <Button
             variant="outline"
             size="sm"
-            className="min-h-10 flex-1 justify-between"
+            className="min-h-10 min-w-0 flex-1 justify-between"
             aria-expanded={filtrosAbertos}
             onClick={() => {
               const proximo = !filtrosAbertos;
@@ -1011,8 +1060,8 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
             <ChevronDown className={`h-4 w-4 transition-transform ${filtrosAbertos ? "rotate-180" : ""}`} />
           </Button>
           <Select value={ordemMobile} onValueChange={aplicarOrdemMobile}>
-            <SelectTrigger className="min-h-10 flex-1">
-              <span className="flex items-center gap-2 truncate">
+            <SelectTrigger className="min-h-10 min-w-0 flex-1">
+              <span className="flex min-w-0 items-center gap-2 truncate whitespace-nowrap">
                 <ArrowDownUp className="h-4 w-4 shrink-0" />
                 <SelectValue />
               </span>
@@ -1347,7 +1396,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
           );
         })()}
         // Documento aprovado: aguarda o certificado; o original só entra se ele falhar.
-        aguardando={certStatus === "carregando" && !certPreview ? "Carregando validação digital..." : null}
+        aguardando={certStatus === "carregando" && !certPreview ? "Carregando assinatura eletrônica..." : null}
         // O comprovante fica sempre visível abaixo do documento.
         // Usa a versão mais recente da lista: o comprovante recém-importado aparece sem reabrir.
         comprovanteDocumentoId={(() => {
@@ -1357,7 +1406,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
         })()}
         // Assinado: o comprovante bancário já vem dentro do certificado; o recibo em
         // dinheiro é outro documento e continua aparecendo abaixo.
-        somenteReciboVinculado={false}
+        somenteReciboVinculado={!!certPreview}
         comprovantesExtras={extrasPreview.map((e) => ({ id: e.id, path: e.file_path, mime: e.mime_type ?? null, rotulo: e.natureza === "estorno" ? "Comprovante de Estorno (Devolução)" : e.natureza === "repagamento" ? "Novo Comprovante (Valor Correto)" : undefined }))}
         toolbar={preview && preview.tipo_key === "atestado" ? (
           <AtestadoResumo rowId={preview.id} filePath={preview.file_path} />
@@ -1419,20 +1468,40 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
         onOpenChange={setLogAberto}
       />
 
+      <DocLixeiraDialog
+        open={lixeiraAberta}
+        companyId={selectedCompanyId ?? null}
+        onOpenChange={setLixeiraAberta}
+        onRestaurado={recarregar}
+      />
+
 
       <AlertDialog open={!!excluir} onOpenChange={(v) => { if (!v) { setExcluir(null); setMotivoExclusao(""); } }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Excluir Documento?</AlertDialogTitle>
+            <AlertDialogTitle>{vaiParaLixeira ? "Mover Documento para a Lixeira?" : "Excluir Documento?"}</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm">
                 <p>
                   {excluir ? `${docSourceConfig(excluir.id).label} · ${excluir.tipo_label} · ${excluir.colaborador_nome} · ${excluir.competencia}` : ""}
                 </p>
-                <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
-                  O arquivo será apagado definitivamente e a pendência deste documento voltará a
-                  aparecer na Conferência de Competências. A exclusão fica registrada no log.
-                </p>
+                {vaiParaLixeira ? (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                    O documento sai da lista, mas fica guardado na Lixeira por {LIXEIRA_DIAS} dias e pode
+                    ser restaurado nesse período. Enquanto estiver na Lixeira, a pendência dele volta a
+                    aparecer na Conferência de Competências. A exclusão fica registrada no log.
+                  </p>
+                ) : origemExcluir === "sind" ? (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                    O arquivo será apagado definitivamente e não vai para a Lixeira. A exclusão fica
+                    registrada no log.
+                  </p>
+                ) : (
+                  <p className="rounded-md border border-amber-200 bg-amber-50 p-2 text-amber-800">
+                    Este registro sai da lista e não vai para a Lixeira. O arquivo e o histórico ficam
+                    guardados e a exclusão fica registrada no log.
+                  </p>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -1452,7 +1521,7 @@ export default function DpHistoricoCompleto({ embutido = false }: { embutido?: b
               onClick={(e) => { e.preventDefault(); confirmarExclusao(); }}
               disabled={excluindo}
             >
-              {excluindo ? "Excluindo…" : "Excluir"}
+              {excluindo ? "Excluindo…" : vaiParaLixeira ? "Mover para a Lixeira" : "Excluir"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

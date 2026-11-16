@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { Loader2, Store } from "lucide-react";
+import { HandCoins, Loader2, Store } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -31,6 +31,7 @@ import {
 } from "@/lib/dp/ponto-conformidade";
 import { POLITICA_LABEL, politicaPedeData, registrarPeriodosPolitica, type PoliticaUnidade } from "@/lib/dp/unidadePoliticas";
 import { forcarRecargaPendencias } from "@/lib/dp/pendencias-resolver";
+import { proximaEtapaUnidade, type UnidadeEtapa } from "@/lib/dp/unidade-etapas";
 
 
 export const onlyNumbers = (v: string) => v.replace(/\D/g, "");
@@ -61,8 +62,13 @@ const blank = {
   possui_relogio_ponto: false,
   tem_adiantamento: false,
   dia_adiantamento: "" as string,
+  adiantamento_antecedencia_dias: "5" as string,
+  adiantamento_aviso: "alteracoes" as "alteracoes" | "relacao_mensal",
+  pagamento_salario_tipo: "" as "" | "quinto_dia_util" | "dia_fixo",
+  pagamento_salario_dia: "" as string,
   banco_horas: false,
   compensa_feriados: false,
+  convoca_feriados_automatico: false,
   compensacao_feriado_antecedencia_dias: "2",
   ciencia_sindical: false,
 };
@@ -87,14 +93,19 @@ export interface UnidadeEdicao {
   relogio_ponto_dispensa_justificativa?: string | null;
   tem_adiantamento?: boolean | null;
   dia_adiantamento?: number | null;
+  adiantamento_antecedencia_dias?: number | null;
+  adiantamento_aviso?: string | null;
+  pagamento_salario_tipo?: string | null;
+  pagamento_salario_dia?: number | null;
   banco_horas?: boolean | null;
   compensa_feriados?: boolean | null;
+  convoca_feriados_automatico?: boolean | null;
   compensacao_feriado_antecedencia_dias?: number | null;
   compensacao_sindical_ciencia_em?: string | null;
 }
 
 /** Abas do cadastro de unidade. */
-export type UnidadeAba = "dados" | "setores" | "funcionamento" | "feriados" | "sindicato";
+export type UnidadeAba = UnidadeEtapa;
 
 interface Props {
   open: boolean;
@@ -197,9 +208,17 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
     salvarFuncionamento.current = fn;
   }, []);
 
+  /**
+   * Última versão gravada da unidade. Com "Salvar e avançar" o diálogo segue
+   * aberto: as comparações (ponto, políticas, ciência sindical) partem do que
+   * acabou de ser salvo, não do que estava gravado quando o diálogo abriu.
+   */
+  const [gravada, setGravada] = useState<UnidadeEdicao | null>(null);
+
   useEffect(() => {
     if (!open) return;
     setCriadaId(null);
+    setGravada(unidade ?? null);
     setAba(unidade ? abaInicial : "dados");
     if (unidade) {
       // Endereço antigo gravado em uma linha só é aproveitado nos campos novos.
@@ -221,8 +240,16 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
         possui_relogio_ponto: unidade.possui_relogio_ponto ?? false,
         tem_adiantamento: unidade.tem_adiantamento ?? false,
         dia_adiantamento: unidade.dia_adiantamento != null ? String(unidade.dia_adiantamento) : "",
+        adiantamento_antecedencia_dias: String(unidade.adiantamento_antecedencia_dias ?? 5),
+        adiantamento_aviso: unidade.adiantamento_aviso === "relacao_mensal" ? "relacao_mensal" : "alteracoes",
+        pagamento_salario_tipo:
+          unidade.pagamento_salario_tipo === "quinto_dia_util" || unidade.pagamento_salario_tipo === "dia_fixo"
+            ? unidade.pagamento_salario_tipo
+            : "",
+        pagamento_salario_dia: unidade.pagamento_salario_dia != null ? String(unidade.pagamento_salario_dia) : "",
         banco_horas: unidade.banco_horas ?? false,
         compensa_feriados: unidade.compensa_feriados ?? false,
+        convoca_feriados_automatico: unidade.convoca_feriados_automatico ?? false,
         compensacao_feriado_antecedencia_dias: String(unidade.compensacao_feriado_antecedencia_dias ?? 2),
         ciencia_sindical: !!unidade.compensacao_sindical_ciencia_em,
       });
@@ -230,7 +257,10 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
     }
     // Nova unidade abre em branco: só a empresa é pré-selecionada quando há uma só.
     const only = companies.length === 1 ? companies[0].id : "";
-    setForm({ ...blank, company_id: only, nome: nomeInicial, ...(inicial ?? {}) });
+    const base = { ...blank, company_id: only, nome: nomeInicial, ...(inicial ?? {}) };
+    setForm(base);
+    // Empresa já conhecida (ex.: lote de fichas): traz endereço e contato dela nos campos vazios.
+    if (inicial?.company_id) void applyCompanyData(inicial.company_id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, unidade?.id, nomeInicial]);
 
@@ -259,21 +289,21 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
   const ativosUnidade = lotacao.data ?? 0;
   const pontoObrigatorio = pontoObrigatorioPorLotacao(ativosUnidade);
   const compensacaoAtiva = form.banco_horas || form.compensa_feriados;
-  const cienciaNova = form.ciencia_sindical && !unidade?.compensacao_sindical_ciencia_em;
-  const pontoOriginal = unidade?.possui_relogio_ponto ?? false;
-  const pontoAlterado = !!unidade && form.possui_relogio_ponto !== pontoOriginal;
+  const cienciaNova = form.ciencia_sindical && !gravada?.compensacao_sindical_ciencia_em;
+  const pontoOriginal = gravada?.possui_relogio_ponto ?? false;
+  const pontoAlterado = !!gravada && form.possui_relogio_ponto !== pontoOriginal;
   const justificativaAlterada =
-    justificativaPonto.trim() !== (unidade?.relogio_ponto_dispensa_justificativa ?? "").trim();
+    justificativaPonto.trim() !== (gravada?.relogio_ponto_dispensa_justificativa ?? "").trim();
 
   // Data de início (ao ligar) ou de fim (ao desligar) de cada política da unidade.
   const [datasPolitica, setDatasPolitica] = useState<Partial<Record<PoliticaUnidade, string>>>({});
   useEffect(() => { if (open) setDatasPolitica({}); }, [open, unidade?.id]);
-  const unidadeNova = !unidade && !criadaId;
+  const unidadeNova = !gravada;
   const politicasForm: { politica: PoliticaUnidade; original: boolean | null | undefined; atual: boolean }[] = [
-    { politica: "relogio_ponto", original: unidade?.possui_relogio_ponto, atual: form.possui_relogio_ponto },
-    { politica: "banco_horas", original: unidade?.banco_horas, atual: form.banco_horas },
-    { politica: "compensa_feriados", original: unidade?.compensa_feriados, atual: form.compensa_feriados },
-    { politica: "adiantamento", original: unidade?.tem_adiantamento, atual: form.tem_adiantamento },
+    { politica: "relogio_ponto", original: gravada?.possui_relogio_ponto, atual: form.possui_relogio_ponto },
+    { politica: "banco_horas", original: gravada?.banco_horas, atual: form.banco_horas },
+    { politica: "compensa_feriados", original: gravada?.compensa_feriados, atual: form.compensa_feriados },
+    { politica: "adiantamento", original: gravada?.tem_adiantamento, atual: form.tem_adiantamento },
   ];
   const politicasPendentes = politicasForm.filter((p) => politicaPedeData(p.original, p.atual, unidadeNova));
   const campoData = (politica: PoliticaUnidade, ativo: boolean) => {
@@ -293,7 +323,11 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
     );
   };
 
-  const save = async () => {
+  /**
+   * Grava a unidade. "fechar" encerra o diálogo (unidade nova segue para a
+   * próxima etapa, como sempre); "avancar" grava e abre a etapa seguinte.
+   */
+  const save = async (modo: "fechar" | "avancar" = "fechar") => {
     if (!form.company_id) {
       toast.error("Selecione a empresa vinculada");
       return;
@@ -315,6 +349,11 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
       });
       return;
     }
+    if (form.pagamento_salario_tipo === "dia_fixo" && !form.pagamento_salario_dia) {
+      setAba("dados");
+      toast.error("Informe o dia do pagamento do salário");
+      return;
+    }
     const semData = politicasPendentes.find((p) => !datasPolitica[p.politica]);
     if (semData) {
       setAba("dados");
@@ -324,6 +363,7 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
       return;
     }
     try {
+      const cienciaEm = compensacaoAtiva && cienciaNova ? new Date().toISOString() : null;
       const salva = await upsert.mutateAsync({
         id: unidadeId ?? undefined,
         company_id: form.company_id,
@@ -352,11 +392,21 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
         ...(unidadeId ? {} : { possui_relogio_ponto: form.possui_relogio_ponto }),
         tem_adiantamento: form.tem_adiantamento,
         dia_adiantamento: form.dia_adiantamento ? Number(form.dia_adiantamento) : null,
+        ...(form.tem_adiantamento
+          ? {
+              adiantamento_antecedencia_dias: Math.min(20, Math.max(1, Math.round(Number(form.adiantamento_antecedencia_dias) || 5))),
+              adiantamento_aviso: form.adiantamento_aviso,
+            }
+          : {}),
+        pagamento_salario_tipo: form.pagamento_salario_tipo || null,
+        pagamento_salario_dia:
+          form.pagamento_salario_tipo === "dia_fixo" && form.pagamento_salario_dia ? Number(form.pagamento_salario_dia) : null,
         banco_horas: form.banco_horas,
         compensa_feriados: form.compensa_feriados,
+        convoca_feriados_automatico: form.convoca_feriados_automatico,
         compensacao_feriado_antecedencia_dias: Math.min(60, Math.max(0, Number(form.compensacao_feriado_antecedencia_dias) || 0)),
         ...(compensacaoAtiva && cienciaNova
-          ? { compensacao_sindical_ciencia_em: new Date().toISOString(), compensacao_sindical_ciencia_por: (await supabase.auth.getUser()).data.user?.id ?? null }
+          ? { compensacao_sindical_ciencia_em: cienciaEm, compensacao_sindical_ciencia_por: (await supabase.auth.getUser()).data.user?.id ?? null }
           : {}),
       } as Parameters<typeof upsert.mutateAsync>[0]);
       if (unidadeId && (pontoAlterado || (!form.possui_relogio_ponto && justificativaAlterada))) {
@@ -383,13 +433,33 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
       setDatasPolitica({});
       if (salvarFuncionamento.current) await salvarFuncionamento.current();
       onSaved?.(salva);
-      if (unidade || criadaId) {
-        toast.success("Unidade atualizada");
+      const eraNova = !gravada;
+      setGravada((anterior) => ({
+        ...(anterior ?? {}),
+        id: salva.id,
+        company_id: form.company_id,
+        nome: form.nome.trim(),
+        ativo: form.ativo,
+        possui_relogio_ponto: form.possui_relogio_ponto,
+        relogio_ponto_dispensa_justificativa: form.possui_relogio_ponto ? null : justificativaPonto.trim() || null,
+        banco_horas: form.banco_horas,
+        compensa_feriados: form.compensa_feriados,
+        tem_adiantamento: form.tem_adiantamento,
+        compensacao_sindical_ciencia_em: cienciaEm ?? anterior?.compensacao_sindical_ciencia_em ?? null,
+      }));
+      if (eraNova) setCriadaId(salva.id);
+      const proxima = proximaEtapaUnidade(aba);
+      if (modo === "avancar" && proxima) {
+        setAba(proxima);
+        toast.success(eraNova ? "Unidade criada. Siga para a próxima etapa." : "Etapa salva.");
+        return;
+      }
+      if (!eraNova || modo === "avancar") {
+        toast.success(eraNova ? "Unidade criada" : "Unidade atualizada");
         onOpenChange(false);
         return;
       }
-      // Nova unidade: mantém aberta para configurar o funcionamento da loja.
-      setCriadaId(salva.id);
+      // Nova unidade pelo "Cadastrar": mantém aberta para configurar o funcionamento da loja.
       setAba("funcionamento");
       toast.success("Unidade criada. Agora defina o horário de funcionamento (opcional).");
     } catch (e) {
@@ -555,6 +625,193 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
                 </p>
               </div>
             )}
+            {form.banco_horas && (
+              <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
+                <p className="text-[11px] leading-relaxed">
+                  Atenção: banco de horas e trabalho/compensação em feriados no comércio e na alimentação dependem de
+                  autorização na Convenção ou no Acordo Coletivo com o sindicato (CLT art. 59 e Lei 10.101/2000, art. 6º-A).
+                  Sem essa negociação, a empresa pode ser autuada e condenada ao pagamento das horas como extras.
+                </p>
+                <label className="flex items-start gap-2 text-xs font-medium">
+                  <input
+                    type="checkbox"
+                    className="mt-0.5"
+                    checked={form.ciencia_sindical}
+                    onChange={(e) => setForm({ ...form, ciencia_sindical: e.target.checked })}
+                  />
+                  Confirmo que a convenção ou acordo coletivo vigente autoriza essas práticas nesta unidade.
+                </label>
+              </div>
+            )}
+          </div>
+          <div className="space-y-3 rounded-xl border border-border p-3">
+            <div className="space-y-1">
+              <Label htmlFor="pagamento_salario_tipo">Pagamento do salário mensal</Label>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Aparece como previsão no calendário dos mensalistas e no calendário do gestor.
+              </p>
+            </div>
+            <Select
+              value={form.pagamento_salario_tipo || "nao_informado"}
+              onValueChange={(v) =>
+                setForm({
+                  ...form,
+                  pagamento_salario_tipo: v === "nao_informado" ? "" : (v as "quinto_dia_util" | "dia_fixo"),
+                  pagamento_salario_dia: v === "dia_fixo" ? form.pagamento_salario_dia : "",
+                })
+              }
+            >
+              <SelectTrigger id="pagamento_salario_tipo">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="nao_informado">Não informar</SelectItem>
+                <SelectItem value="quinto_dia_util">5º dia útil do mês</SelectItem>
+                <SelectItem value="dia_fixo">Dia fixo do mês</SelectItem>
+              </SelectContent>
+            </Select>
+            {form.pagamento_salario_tipo === "quinto_dia_util" && (
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Conta de segunda a sábado (CLT, art. 459, §1º). Domingos e feriados nacionais, estaduais e municipais
+                cadastrados na unidade não contam. Com Pix, o pagamento pode ser feito no próprio sábado.
+              </p>
+            )}
+            {form.pagamento_salario_tipo === "dia_fixo" && (
+              <div className="space-y-2">
+                <Label htmlFor="pagamento_salario_dia">Dia do Pagamento *</Label>
+                <Select
+                  value={form.pagamento_salario_dia || ""}
+                  onValueChange={(v) => setForm({ ...form, pagamento_salario_dia: v })}
+                >
+                  <SelectTrigger id="pagamento_salario_dia">
+                    <SelectValue placeholder="Selecione o dia" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 31 }, (_, i) => i + 1).map((dia) => (
+                      <SelectItem key={dia} value={dia.toString()}>{dia}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {Number(form.pagamento_salario_dia) > 5 && (
+                  <p className="rounded-lg border border-warning/40 bg-warning/10 p-2.5 text-[11px] leading-relaxed">
+                    Atenção: para o salário do mês anterior, a CLT fixa o prazo até o 5º dia útil. Depois do dia 5,
+                    a data pode passar desse prazo em alguns meses.
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+          <div id="unidade-adiantamento" className="scroll-mt-4 space-y-3 rounded-xl border border-border p-3">
+            <div className="flex min-h-11 items-center gap-3">
+            <Switch
+              id="tem_adiantamento"
+              checked={form.tem_adiantamento}
+              onCheckedChange={(v) =>
+                setForm({ ...form, tem_adiantamento: v, dia_adiantamento: v ? form.dia_adiantamento : "" })
+              }
+            />
+            <Label htmlFor="tem_adiantamento">Tem adiantamento salarial</Label>
+            </div>
+            {campoData("adiantamento", form.tem_adiantamento)}
+            {form.tem_adiantamento && (
+              <div className="space-y-2">
+                <Label>Dia do Adiantamento</Label>
+                <Select
+                  value={form.dia_adiantamento || ""}
+                  onValueChange={(v) => setForm({ ...form, dia_adiantamento: v })}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o dia" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {Array.from({ length: 28 }, (_, i) => i + 1).map((dia) => (
+                      <SelectItem key={dia} value={dia.toString()}>{dia}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+            {form.tem_adiantamento && (
+              <div className="space-y-2">
+                <Label htmlFor="adiantamento_antecedencia_dias">Antecedência mínima para o pedido (dias)</Label>
+                <Input
+                  id="adiantamento_antecedencia_dias"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  max={20}
+                  value={form.adiantamento_antecedencia_dias}
+                  onChange={(e) => setForm({ ...form, adiantamento_antecedencia_dias: e.target.value })}
+                />
+                <p className="text-xs text-muted-foreground">
+                  {(() => {
+                    const dia = Number(form.dia_adiantamento);
+                    const ant = Number(form.adiantamento_antecedencia_dias) || 5;
+                    const prazo = dia && dia - ant >= 1 ? `até o dia ${dia - ant}` : `até ${ant} dias antes do pagamento`;
+                    return `O colaborador pede ou suspende pelo portal ${prazo} para valer no mês; depois, vale a partir do mês seguinte. O gestor altera a qualquer momento, sem antecedência.`;
+                  })()}
+                </p>
+              </div>
+            )}
+            {form.tem_adiantamento && (
+              <div className="space-y-2">
+                <Label>Avisos para a gestão</Label>
+                <Select
+                  value={form.adiantamento_aviso}
+                  onValueChange={(v) => setForm({ ...form, adiantamento_aviso: v as "alteracoes" | "relacao_mensal" })}
+                >
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="alteracoes">Só novas adesões e suspensões</SelectItem>
+                    <SelectItem value="relacao_mensal">Relação completa todo mês</SelectItem>
+                  </SelectContent>
+                </Select>
+                <p className="text-xs text-muted-foreground">
+                  {form.adiantamento_aviso === "relacao_mensal"
+                    ? "Além de cada pedido, quando o prazo fecha chega o aviso com todos que recebem no mês, pronto para baixar em PDF."
+                    : "Aviso a cada pedido feito pelo portal."}
+                </p>
+              </div>
+            )}
+            {/* Só depois de gravado ligado: antes disso não há relação para ver. */}
+            {unidadeId && form.tem_adiantamento && gravada?.tem_adiantamento && (
+              <Button asChild variant="outline" className="min-h-11 w-full sm:w-auto">
+                <Link to={`/dp/adiantamentos?unidade=${unidadeId}`} onClick={() => onOpenChange(false)}>
+                  <HandCoins className="mr-2 h-4 w-4" aria-hidden="true" />
+                  Ver relação de adiantamentos desta unidade
+                </Link>
+              </Button>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="setores" className="mt-0 min-h-0 min-w-0 w-full flex-1 space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain p-4 [&_input]:min-w-0 [&_input]:max-w-full [&_input]:min-h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:min-h-11 [&_button[role=combobox]]:min-w-0 [&_button[role=combobox]>span]:truncate">
+          <UnidadeSetoresPanel unidadeId={unidadeId} unidadeNome={form.nome} />
+        </TabsContent>
+
+        <TabsContent value="funcionamento" className="mt-0 min-h-0 min-w-0 w-full flex-1 space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain p-4 [&_input]:min-w-0 [&_input]:max-w-full [&_input]:min-h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:min-h-11 [&_button[role=combobox]]:min-w-0 [&_button[role=combobox]>span]:truncate">
+          <Label className="flex items-center gap-1.5">
+            <Store className="h-4 w-4" aria-hidden="true" />
+            Horário de funcionamento da loja
+          </Label>
+          <HorarioFuncionamentoEditor unidadeId={unidadeId} semRodape onRegistrarSalvar={registrarSalvar} />
+        </TabsContent>
+
+        <TabsContent value="feriados" className="mt-0 min-h-0 min-w-0 w-full flex-1 space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain p-4 [&_input]:min-w-0 [&_input]:max-w-full [&_input]:min-h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:min-h-11 [&_button[role=combobox]]:min-w-0 [&_button[role=combobox]>span]:truncate">
+          <section aria-labelledby="regras-feriado-titulo" className="space-y-3 rounded-xl border border-border p-3">
+            <h3 id="regras-feriado-titulo" className="text-sm font-semibold">Regras de feriado</h3>
+            <div className="space-y-2">
+            <div className="flex min-h-11 items-center gap-3">
+              <Switch id="convoca_feriados_automatico" checked={form.convoca_feriados_automatico} onCheckedChange={(v) => setForm({ ...form, convoca_feriados_automatico: v })} />
+              <Label htmlFor="convoca_feriados_automatico">Convocação automática para feriados (conforme ACT/CCT)</Label>
+            </div>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              {form.convoca_feriados_automatico
+                ? "Ligado: na geração da escala, quem trabalha normalmente naquele dia da semana fica convocado para todos os feriados e é notificado. Quem tem folga fixa, férias, atestado ou outro afastamento no feriado não é convocado. Incluir depois quem tinha folga fixa no feriado gera pagamento em dobro."
+                : "Desligado: ninguém é convocado automaticamente para feriados. A loja recebe alerta para montar a escala de cada feriado manualmente. Escalar quem tem folga fixa no feriado gera pagamento em dobro."}
+            </p>
+            </div>
+            <div className="space-y-2 border-t border-border pt-3">
             <div className="flex min-h-11 items-center gap-3">
               <Switch id="compensa_feriados" checked={form.compensa_feriados} onCheckedChange={(v) => setForm({ ...form, compensa_feriados: v })} />
               <Label htmlFor="compensa_feriados">Compensação de feriados</Label>
@@ -575,7 +832,8 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
                 <p className="text-[11px] text-muted-foreground">Pedidos com prazo menor não são barrados, mas o colaborador é avisado de que podem ser recusados.</p>
               </div>
             )}
-            {compensacaoAtiva && (
+            </div>
+            {form.compensa_feriados && !form.banco_horas && (
               <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2.5">
                 <p className="text-[11px] leading-relaxed">
                   Atenção: banco de horas e trabalho/compensação em feriados no comércio e na alimentação dependem de
@@ -593,57 +851,13 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
                 </label>
               </div>
             )}
-          </div>
-          <div className="flex min-h-11 items-center gap-3 rounded-xl border border-border p-3">
-            <Switch
-              id="tem_adiantamento"
-              checked={form.tem_adiantamento}
-              onCheckedChange={(v) =>
-                setForm({ ...form, tem_adiantamento: v, dia_adiantamento: v ? form.dia_adiantamento : "" })
-              }
-            />
-            <Label htmlFor="tem_adiantamento">Tem adiantamento salarial</Label>
-          </div>
-          {campoData("adiantamento", form.tem_adiantamento)}
-          {form.tem_adiantamento && (
-            <div className="space-y-2">
-              <Label>Dia do Adiantamento</Label>
-              <Select
-                value={form.dia_adiantamento || ""}
-                onValueChange={(v) => setForm({ ...form, dia_adiantamento: v })}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o dia" />
-                </SelectTrigger>
-                <SelectContent>
-                  {Array.from({ length: 28 }, (_, i) => i + 1).map((dia) => (
-                    <SelectItem key={dia} value={dia.toString()}>{dia}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="setores" className="mt-0 min-h-0 min-w-0 w-full flex-1 space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain p-4 [&_input]:min-w-0 [&_input]:max-w-full [&_input]:min-h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:min-h-11 [&_button[role=combobox]]:min-w-0 [&_button[role=combobox]>span]:truncate">
-          <UnidadeSetoresPanel unidadeId={unidadeId} unidadeNome={form.nome} />
-        </TabsContent>
-
-        <TabsContent value="funcionamento" className="mt-0 min-h-0 min-w-0 w-full flex-1 space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain p-4 [&_input]:min-w-0 [&_input]:max-w-full [&_input]:min-h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:min-h-11 [&_button[role=combobox]]:min-w-0 [&_button[role=combobox]>span]:truncate">
-          <Label className="flex items-center gap-1.5">
-            <Store className="h-4 w-4" aria-hidden="true" />
-            Horário de funcionamento da loja
-          </Label>
-          <HorarioFuncionamentoEditor unidadeId={unidadeId} semRodape onRegistrarSalvar={registrarSalvar} />
-        </TabsContent>
-
-        <TabsContent value="feriados" className="mt-0 min-h-0 min-w-0 w-full flex-1 space-y-2 overflow-y-auto overflow-x-hidden overscroll-contain p-4 [&_input]:min-w-0 [&_input]:max-w-full [&_input]:min-h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:min-h-11 [&_button[role=combobox]]:min-w-0 [&_button[role=combobox]>span]:truncate">
+          </section>
           <UnidadeFeriadosPanel unidadeId={unidadeId} />
         </TabsContent>
 
 
         <TabsContent value="sindicato" className="mt-0 min-h-0 min-w-0 w-full flex-1 space-y-6 overflow-y-auto overflow-x-hidden overscroll-contain p-4 [&_input]:min-w-0 [&_input]:max-w-full [&_input]:min-h-11 [&_input]:text-base [&_textarea]:text-base [&_button[role=combobox]]:min-h-11 [&_button[role=combobox]]:min-w-0 [&_button[role=combobox]>span]:truncate">
-          <UnidadeSindicatoPanel unidadeId={unidadeId} unidadeNome={form.nome} />
+          <UnidadeSindicatoPanel unidadeId={unidadeId} unidadeNome={form.nome} cidade={form.cidade} uf={form.uf} />
           <div className="border-t pt-4">
             <UnidadeNegociacoesPanel unidadeId={unidadeId} unidadeNome={form.nome} />
           </div>
@@ -651,12 +865,23 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
 
         </Tabs>
         <DialogFooter className="shrink-0 flex-row gap-2 border-t p-4 pb-[max(1rem,env(safe-area-inset-bottom))] sm:flex-row">
-          <Button variant="ghost" className="h-11 w-full sm:w-auto" onClick={() => onOpenChange(false)}>
+          <Button variant="ghost" className="hidden h-11 sm:inline-flex sm:w-auto" onClick={() => onOpenChange(false)}>
             {criadaId ? "Fechar" : "Cancelar"}
           </Button>
-          <Button className="h-11 w-full sm:w-auto" onClick={save} disabled={upsert.isPending}>
-            {upsert.isPending ? "Salvando..." : unidade || criadaId ? "Salvar" : "Cadastrar"}
-          </Button>
+          {proximaEtapaUnidade(aba) ? (
+            <>
+              <Button variant="outline" className="h-11 flex-1 sm:flex-none sm:w-auto" onClick={() => void save("fechar")} disabled={upsert.isPending}>
+                {gravada ? "Salvar" : "Cadastrar"}
+              </Button>
+              <Button className="h-11 flex-1 sm:flex-none sm:w-auto" onClick={() => void save("avancar")} disabled={upsert.isPending}>
+                {upsert.isPending ? "Salvando..." : "Salvar e avançar"}
+              </Button>
+            </>
+          ) : (
+            <Button className="h-11 w-full sm:w-auto" onClick={() => void save("fechar")} disabled={upsert.isPending}>
+              {upsert.isPending ? "Salvando..." : gravada ? "Salvar e concluir" : "Cadastrar"}
+            </Button>
+          )}
         </DialogFooter>
 
       </DialogContent>

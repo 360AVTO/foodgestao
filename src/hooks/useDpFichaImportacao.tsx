@@ -1,17 +1,22 @@
 import { useEffect, useRef } from "react";
+import { definirModoAssinatura } from "@/hooks/useDpModoAssinatura";
+import { hojeBrasilia } from "@/lib/dp/modo-assinatura";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { supabase } from "@/integrations/supabase/client";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
-import type { Database } from "@/integrations/supabase/types";
-import { montarJornadaSugerida, type JornadaSugerida } from "@/lib/dp/ficha-registro/jornada-parse";
+import type { Database, Json } from "@/integrations/supabase/types";
+import { jornadaDosDadosDaFicha, type JornadaSugerida } from "@/lib/dp/ficha-registro/jornada-parse";
 import { digits, montarPayloadFicha, txt } from "@/lib/dp/ficha-registro/payload";
 import {
   aplicarFichaRpc,
   efetivarPreadmissaoComFichaRpc,
   ignorarFichaRpc,
+  reativarFichaRpc,
 } from "@/lib/dp/ficha-registro/aplicarFichaRpc";
 import { DP_DOCUMENTOS_BUCKET } from "@/hooks/useDpDocumentos";
+import { resumirEnvios } from "@/lib/dp/ficha-registro/lote-andamento";
+import type { AjusteFichaLote, EscolhasLote, OrganizacaoLote } from "@/lib/dp/ficha-registro/organizacao-lote";
 import { registrarDocumento as registrarDocumentoOficial } from "@/lib/dp/documentos-oficial";
 import {
   anexarFichaRecorte,
@@ -43,12 +48,7 @@ export interface FichaDadosEditaveis {
 
 /** Jornada sugerida pela ficha, pronta para a tela de revisão. */
 export function jornadaDaFicha(dados: Record<string, unknown> | null): JornadaSugerida {
-  const d = (dados ?? {}) as Record<string, unknown>;
-  return montarJornadaSugerida({
-    jornada_texto: (d.jornada_texto as string | null) ?? null,
-    // deno-lint-ignore no-explicit-any
-    jornada_dias: (d.jornada_dias as any[]) ?? [],
-  });
+  return jornadaDosDadosDaFicha(dados);
 }
 
 
@@ -265,6 +265,8 @@ export interface AplicarFichaInput {
   formaPagamento: string;
   possuiFolhaPonto: boolean;
   optanteAdiantamento: boolean;
+  /** Assina documentos em papel: grava o modo (com histórico) logo após o cadastro. */
+  assinaturaPapel?: boolean;
   /**
    * Conferência da ficha oficial de uma Pré-Admissão: quando informado, o
    * cadastro e a conclusão da pré-admissão acontecem na MESMA transação.
@@ -280,6 +282,9 @@ export interface AplicarFichaResultado {
   anexoMotivo?: string;
   /** Só na conferência de pré-admissão: "importacao", "recontratacao" ou "idempotente". */
   modo?: string;
+  /** Assinatura em papel: gravada, não pedida ou falhou (o cadastro continua confirmado). */
+  assinatura?: "ok" | "nao_solicitado" | "falhou";
+  assinaturaMotivo?: string;
 }
 
 /**
@@ -291,13 +296,11 @@ export interface AplicarFichaResultado {
  *
  * O anexo do PDF é do Storage, portanto NÃO participa dessa transação: ele
  * roda depois, é repetível sem multiplicar arquivos e uma falha aqui não
- * desfaz — nem repete — o cadastro já confirmado.
+ * desfaz — nem repete — o cadastro já confirmado. Usada pela conferência
+ * individual e pela efetivação das fichas prontas do lote.
  */
-export function useAplicarFicha() {
-  const qc = useQueryClient();
-  const { selectedCompanyId } = useCompanyContext();
-  return useMutation({
-    mutationFn: async ({
+export async function aplicarFichaNoCadastro(selectedCompanyId: string | null, input: AplicarFichaInput): Promise<AplicarFichaResultado> {
+  const {
       item,
       dados,
       cargoId,
@@ -313,135 +316,177 @@ export function useAplicarFicha() {
       possuiFolhaPonto,
       optanteAdiantamento,
       preadmissaoId,
-    }: AplicarFichaInput) => {
-      if (!selectedCompanyId) throw new Error("Selecione uma empresa.");
-      const nome = txt(dados.nome);
-      const cpf = digits(dados.cpf);
-      if (!nome) throw new Error("Informe o nome do colaborador.");
-      if (cpf.length !== 11) throw new Error("Informe um CPF com 11 dígitos.");
+      assinaturaPapel,
+    } = input;
+  if (!selectedCompanyId) throw new Error("Selecione uma empresa.");
+  const nome = txt(dados.nome);
+  const cpf = digits(dados.cpf);
+  if (!nome) throw new Error("Informe o nome do colaborador.");
+  if (cpf.length !== 11) throw new Error("Informe um CPF com 11 dígitos.");
 
-      // O servidor tem a própria lista de campos permitidos: aqui só mapeamos a
-      // ficha para as colunas do cadastro. Empresa, conta, perfil e permissões
-      // nunca vão no payload.
-      const dadosCadastro = montarPayloadFicha(dados as Record<string, unknown>);
+  // O servidor tem a própria lista de campos permitidos: aqui só mapeamos a
+  // ficha para as colunas do cadastro. Empresa, conta, perfil e permissões
+  // nunca vão no payload.
+  const dadosCadastro = montarPayloadFicha(dados as Record<string, unknown>);
 
-      // Conferência da ficha oficial de uma Pré-Admissão: cadastro + conclusão
-      // da pré-admissão em UMA transação, com familiares e documentos já
-      // enviados pelo candidato aproveitados pela própria rotina do banco.
-      if (preadmissaoId) {
-        const pr = await efetivarPreadmissaoComFichaRpc({
-          p_preadmissao_id: preadmissaoId,
-          p_item_id: item.id,
-          p_dados: { ...dadosCadastro, nome, cpf },
-          p_campos: camposPermitidos ?? null,
-          p_cargo_id: cargoId,
-          p_unidade_id: unidadeId,
-          p_setor_id: setorId ?? null,
-          p_turno_id: turnoId ?? null,
-          p_regime: regime ?? null,
-          p_forma_pagamento: formaPagamento,
-          p_jornada: jornada && !jornada.vazia
-            ? { dias: jornada.dias as unknown as Array<Record<string, unknown>> }
-            : null,
-          p_justificativa: null,
-          // Recontratação também respeita o que o gestor decidiu na revisão:
-          // salário e data de admissão da ficha conferida, não o rascunho.
-          p_salario: Number.isFinite(Number(dadosCadastro.salario_base))
-            ? Number(dadosCadastro.salario_base)
-            : null,
-          p_data_admissao: (dadosCadastro.data_admissao as string | null) ?? null,
-        });
-        return {
-          colaboradorId: pr.colaborador_id,
-          jaAplicado: !!pr.ja_aplicado,
-          anexo: "nao_solicitado" as AnexoFichaStatus,
-          modo: pr.modo,
-        };
-      }
+  // Conferência da ficha oficial de uma Pré-Admissão: cadastro + conclusão
+  // da pré-admissão em UMA transação, com familiares e documentos já
+  // enviados pelo candidato aproveitados pela própria rotina do banco.
+  if (preadmissaoId) {
+    const pr = await efetivarPreadmissaoComFichaRpc({
+      p_preadmissao_id: preadmissaoId,
+      p_item_id: item.id,
+      p_dados: { ...dadosCadastro, nome, cpf },
+      p_campos: camposPermitidos ?? null,
+      p_cargo_id: cargoId,
+      p_unidade_id: unidadeId,
+      p_setor_id: setorId ?? null,
+      p_turno_id: turnoId ?? null,
+      p_regime: regime ?? null,
+      p_forma_pagamento: formaPagamento,
+      p_jornada: jornada && !jornada.vazia
+        ? { dias: jornada.dias as unknown as Array<Record<string, unknown>> }
+        : null,
+      p_justificativa: null,
+      // Recontratação também respeita o que o gestor decidiu na revisão:
+      // salário e data de admissão da ficha conferida, não o rascunho.
+      p_salario: Number.isFinite(Number(dadosCadastro.salario_base))
+        ? Number(dadosCadastro.salario_base)
+        : null,
+      p_data_admissao: (dadosCadastro.data_admissao as string | null) ?? null,
+    });
+    const ass = await gravarAssinaturaPapel(pr.colaborador_id, !!assinaturaPapel, false, dadosCadastro.data_admissao);
+    return {
+      colaboradorId: pr.colaborador_id,
+      jaAplicado: !!pr.ja_aplicado,
+      anexo: "nao_solicitado" as AnexoFichaStatus,
+      modo: pr.modo,
+      ...ass,
+    };
+  }
 
-      const res = await aplicarFichaRpc({
-        p_item_id: item.id,
-        p_dados: { ...dadosCadastro, nome, cpf },
-        p_dados_extraidos: dados as Record<string, unknown>,
-        p_campos: atualizarExistente ? camposPermitidos ?? null : null,
-        // A decisão do usuário vai como está: quem recusa vínculo inválido é a
-        // rotina no banco (nunca transformamos "atualizar" em "criar" aqui).
-        p_atualizar_existente: atualizarExistente,
-        p_cargo_id: cargoId,
-        p_unidade_id: unidadeId,
-        p_setor_id: setorId ?? null,
-        p_turno_id: turnoId ?? null,
-        p_regime: regime ?? null,
-        p_forma_pagamento: formaPagamento,
-        p_possui_folha_ponto: possuiFolhaPonto,
-        p_optante_adiantamento: optanteAdiantamento,
-        p_jornada: jornada && !jornada.vazia ? { dias: jornada.dias as unknown as Array<Record<string, unknown>> } : null,
-      });
+  // Motivo da dispensa de ponto: sem ele o banco religa o ponto do vínculo de emprego.
+  const motivoPonto = possuiFolhaPonto === false ? txt(dados.folha_ponto_dispensa_justificativa) : null;
+  const res = await aplicarFichaRpc({
+    p_item_id: item.id,
+    p_dados: { ...dadosCadastro, nome, cpf, ...(motivoPonto ? { folha_ponto_dispensa_justificativa: motivoPonto } : {}) },
+    p_dados_extraidos: dados as Record<string, unknown>,
+    p_campos: atualizarExistente ? camposPermitidos ?? null : null,
+    // A decisão do usuário vai como está: quem recusa vínculo inválido é a
+    // rotina no banco (nunca transformamos "atualizar" em "criar" aqui).
+    p_atualizar_existente: atualizarExistente,
+    p_cargo_id: cargoId,
+    p_unidade_id: unidadeId,
+    p_setor_id: setorId ?? null,
+    p_turno_id: turnoId ?? null,
+    p_regime: regime ?? null,
+    p_forma_pagamento: formaPagamento,
+    p_possui_folha_ponto: possuiFolhaPonto,
+    p_optante_adiantamento: optanteAdiantamento,
+    p_jornada: jornada && !jornada.vazia ? { dias: jornada.dias as unknown as Array<Record<string, unknown>> } : null,
+  });
 
-      const colaboradorId = res.colaborador_id;
-      let anexo: AnexoFichaStatus = "nao_solicitado";
-      let anexoMotivo: string | undefined;
+  const colaboradorId = res.colaborador_id;
+  // Antes do anexo: o documento da ficha já nasce pedindo a via impressa.
+  const ass = await gravarAssinaturaPapel(colaboradorId, !!assinaturaPapel, atualizarExistente, dadosCadastro.data_admissao);
+  let anexo: AnexoFichaStatus = "nao_solicitado";
+  let anexoMotivo: string | undefined;
 
-      // Anexo em Storage: fora da transação do banco, por isso é tratado à
-      // parte — o cadastro já está confirmado e nunca é refeito por causa dele.
-      // O lote é um PDF com várias pessoas: anexamos SOMENTE o recorte das
-      // páginas deste item, jamais o arquivo completo. O caminho de origem vem
-      // do servidor, nunca do cliente, e o destino é determinístico, então
-      // repetir o anexo não multiplica arquivo nem registro.
-      if (anexarFicha) {
-        const r = await anexarFichaRecorte(
-          {
-            companyId: selectedCompanyId,
-            colaboradorId,
-            itemId: item.id,
-            arquivoPath: res.arquivo_path,
-            paginaInicio: res.pagina_inicio,
-            paginaFim: res.pagina_fim,
-          },
-          {
-            baixarLote: async (path) => {
-              const dl = await supabase.storage.from(BUCKET).download(path);
-              if (dl.error || !dl.data) throw new Error(dl.error?.message ?? "Arquivo do lote não encontrado.");
-              return await dl.data.arrayBuffer();
-            },
-            enviarRecorte: async (destino, pdf) =>
-              await supabase.storage.from(DP_DOCUMENTOS_BUCKET).upload(
-                destino,
-                new Blob([pdf as unknown as BlobPart], { type: "application/pdf" }),
-                { contentType: "application/pdf", upsert: false },
-              ),
-            documentoExistente: async (destino) => {
-              const q = await supabase
-                .from("dp_documentos")
-                .select("id")
-                .eq("company_id", selectedCompanyId)
-                .eq("colaborador_id", colaboradorId)
-                .eq("file_path", destino)
-                .maybeSingle();
-              if (q.error) throw q.error;
-              return !!q.data?.id;
-            },
-            registrarDocumento: async ({ destino, descricao }) => {
-              await registrarDocumentoOficial({
-                company_id: selectedCompanyId,
-                colaborador_id: colaboradorId,
-                file_path: destino,
-                file_name: "ficha-registro.pdf",
-                mime_type: "application/pdf",
-                tipo: "admissao",
-                titulo: "Ficha de registro importada",
-                descricao,
-              });
-              return { error: null };
-            },
-          },
-        );
-        anexo = r.status;
-        anexoMotivo = r.motivo;
-      }
+  // Anexo em Storage: fora da transação do banco, por isso é tratado à
+  // parte — o cadastro já está confirmado e nunca é refeito por causa dele.
+  // O lote é um PDF com várias pessoas: anexamos SOMENTE o recorte das
+  // páginas deste item, jamais o arquivo completo. O caminho de origem vem
+  // do servidor, nunca do cliente, e o destino é determinístico, então
+  // repetir o anexo não multiplica arquivo nem registro.
+  if (anexarFicha) {
+    const r = await anexarFichaRecorte(
+      {
+        companyId: selectedCompanyId,
+        colaboradorId,
+        itemId: item.id,
+        arquivoPath: res.arquivo_path,
+        paginaInicio: res.pagina_inicio,
+        paginaFim: res.pagina_fim,
+      },
+      {
+        baixarLote: async (path) => {
+          const dl = await supabase.storage.from(BUCKET).download(path);
+          if (dl.error || !dl.data) throw new Error(dl.error?.message ?? "Arquivo do lote não encontrado.");
+          return await dl.data.arrayBuffer();
+        },
+        enviarRecorte: async (destino, pdf) =>
+          await supabase.storage.from(DP_DOCUMENTOS_BUCKET).upload(
+            destino,
+            new Blob([pdf as unknown as BlobPart], { type: "application/pdf" }),
+            { contentType: "application/pdf", upsert: false },
+          ),
+        documentoExistente: async (destino) => {
+          const q = await supabase
+            .from("dp_documentos")
+            .select("id")
+            .eq("company_id", selectedCompanyId)
+            .eq("colaborador_id", colaboradorId)
+            .eq("file_path", destino)
+            .maybeSingle();
+          if (q.error) throw q.error;
+          return !!q.data?.id;
+        },
+        registrarDocumento: async ({ destino, descricao }) => {
+          await registrarDocumentoOficial({
+            company_id: selectedCompanyId,
+            colaborador_id: colaboradorId,
+            file_path: destino,
+            file_name: "ficha-registro.pdf",
+            mime_type: "application/pdf",
+            tipo: "admissao",
+            titulo: "Ficha de registro importada",
+            descricao,
+          });
+          return { error: null };
+        },
+      },
+    );
+    anexo = r.status;
+    anexoMotivo = r.motivo;
+  }
 
-      return { colaboradorId, jaAplicado: res.ja_aplicado, anexo, anexoMotivo } satisfies AplicarFichaResultado;
-    },
+  return { colaboradorId, jaAplicado: res.ja_aplicado, anexo, anexoMotivo, ...ass } satisfies AplicarFichaResultado;
+}
+
+/**
+ * Grava "assina em papel" com histórico. Cadastro novo vale desde a admissão;
+ * atualização de quem já existe vale a partir de hoje (nunca reescreve o passado).
+ * Falha aqui não desfaz o cadastro: volta como aviso para ajustar na ficha.
+ */
+async function gravarAssinaturaPapel(
+  colaboradorId: string,
+  papel: boolean,
+  existente: boolean,
+  dataAdmissao: unknown,
+): Promise<Pick<AplicarFichaResultado, "assinatura" | "assinaturaMotivo">> {
+  if (!papel) return { assinatura: "nao_solicitado" };
+  const hoje = hojeBrasilia();
+  const adm = typeof dataAdmissao === "string" && /^\d{4}-\d{2}-\d{2}/.test(dataAdmissao) ? dataAdmissao.slice(0, 10) : null;
+  try {
+    await definirModoAssinatura({
+      colaboradorId,
+      modo: "fisica",
+      vigenteDesde: !existente && adm ? adm : hoje,
+      motivo: "Marcado na importação da ficha de registro",
+      converterPendentes: true,
+      origem: "importacao_ficha",
+    });
+    return { assinatura: "ok" };
+  } catch (e) {
+    return { assinatura: "falhou", assinaturaMotivo: e instanceof Error ? e.message : undefined };
+  }
+}
+
+export function useAplicarFicha() {
+  const qc = useQueryClient();
+  const { selectedCompanyId } = useCompanyContext();
+  return useMutation({
+    mutationFn: (input: AplicarFichaInput) => aplicarFichaNoCadastro(selectedCompanyId, input),
     onSuccess: (res) => {
       // O cadastro está confirmado: nada aqui pede para criar outro. O erro do
       // anexo é mostrado sem ser silenciado e o anexo pode ser repetido depois.
@@ -456,19 +501,25 @@ export function useAplicarFicha() {
           "Recontratação registrada: o cadastro anterior foi reativado com um novo vínculo e os dados conferidos.",
         );
       }
-      qc.invalidateQueries({ queryKey: ["dp_preadmissoes"] });
-      qc.invalidateQueries({ queryKey: ["dp_ficha_itens"] });
-      qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] });
-      qc.invalidateQueries({ queryKey: ["dp_colaboradores"] });
-      // Chaves REAIS dos hooks de jornada/escala (a rotina grava configuração e dias).
-      qc.invalidateQueries({ queryKey: ["dp_colab_config_trabalho"] });
-      qc.invalidateQueries({ queryKey: ["dp_escala_base_mes"] });
-      qc.invalidateQueries({ queryKey: ["dp_panorama_base"] });
-      qc.invalidateQueries({ queryKey: ["dp_cargo_padrao"] });
-      qc.invalidateQueries({ queryKey: ["dp_modelos_horario"] });
-      qc.invalidateQueries({ queryKey: ["dp_documentos"] });
+      invalidarAposAplicarFicha(qc);
     },
   });
+}
+
+/** O que muda na tela depois que uma ficha vira cadastro. */
+export function invalidarAposAplicarFicha(qc: ReturnType<typeof useQueryClient>) {
+  qc.invalidateQueries({ queryKey: ["dp_preadmissoes"] });
+  qc.invalidateQueries({ queryKey: ["dp_ficha_itens"] });
+  qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] });
+  qc.invalidateQueries({ queryKey: ["dp_colaboradores"] });
+  qc.invalidateQueries({ queryKey: ["franquia-colaboradores"] });
+  // Chaves REAIS dos hooks de jornada/escala (a rotina grava configuração e dias).
+  qc.invalidateQueries({ queryKey: ["dp_colab_config_trabalho"] });
+  qc.invalidateQueries({ queryKey: ["dp_escala_base_mes"] });
+  qc.invalidateQueries({ queryKey: ["dp_panorama_base"] });
+  qc.invalidateQueries({ queryKey: ["dp_cargo_padrao"] });
+  qc.invalidateQueries({ queryKey: ["dp_modelos_horario"] });
+  qc.invalidateQueries({ queryKey: ["dp_documentos"] });
 }
 
 /**
@@ -485,6 +536,182 @@ export function useIgnorarFicha() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["dp_ficha_itens"] });
       qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] });
+    },
+  });
+}
+
+/** Desfaz o "ignorar": a ficha volta a ficar aberta para conferência (nada é criado). */
+export function useReativarFicha() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (itemId: string) => reativarFichaRpc(itemId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dp_ficha_itens"] });
+      qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] });
+    },
+  });
+}
+
+/** Um grupo de cargo enviado para a organização do lote. */
+export interface GrupoOrganizacaoInput {
+  chave?: string | null;
+  /** Só para fichas com cargo genérico: a decisão vale para estas fichas. */
+  item_ids?: string[];
+  cargo_id?: string | null;
+  cargo_nome?: string | null;
+  cbo?: string | null;
+  setor_id?: string | null;
+  setor_nome?: string | null;
+}
+
+function mensagemOrganizacao(e: { message?: string } | null): string {
+  const m = e?.message ?? "";
+  if (/SEM_PERMISSAO/.test(m)) return "Apenas o dono ou um administrador da empresa organiza o lote.";
+  if (/CARGO_GENERICO/.test(m)) return "Escolha o cargo real das fichas marcadas como genéricas.";
+  if (/UNIDADE_INVALIDA/.test(m)) return "Escolha uma unidade desta empresa.";
+  if (/SINDICATO_INVALIDO/.test(m)) return "Escolha um sindicato laboral desta empresa.";
+  if (/SETOR_INVALIDO/.test(m)) return "Um dos setores não pertence à unidade escolhida.";
+  return "Não foi possível salvar cargos e setores. Nada foi alterado; tente novamente.";
+}
+
+/** Cria/vincula cargos e setores do lote numa única transação, sem cadastrar ninguém. */
+export function useOrganizarLoteFicha() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: {
+      importacaoId: string;
+      unidadeId: string;
+      sindicatoLaboralId: string | null;
+      grupos: GrupoOrganizacaoInput[];
+    }) => {
+      const { data, error } = await supabase.rpc("dp_ficha_lote_organizar", {
+        p_importacao_id: input.importacaoId,
+        p_unidade_id: input.unidadeId,
+        p_grupos: input.grupos as unknown as Database["public"]["Functions"]["dp_ficha_lote_organizar"]["Args"]["p_grupos"],
+        p_sindicato_laboral_id: input.sindicatoLaboralId ?? undefined,
+      });
+      if (error) throw new Error(mensagemOrganizacao(error));
+      return data as { cargos_criados: number; setores_criados: number };
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] });
+      qc.invalidateQueries({ queryKey: ["dp_cargos"] });
+      qc.invalidateQueries({ queryKey: ["dp_setores"] });
+      qc.invalidateQueries({ queryKey: ["dp_sindicatos"] });
+      qc.invalidateQueries({ queryKey: ["dp_laboral_por_cargo"] });
+    },
+  });
+}
+
+function mensagemAjuste(e: { message?: string } | null): string {
+  const m = e?.message ?? "";
+  if (/SEM_PERMISSAO/.test(m)) return "Apenas o dono ou um administrador da empresa ajusta o lote.";
+  if (/FICHA_INVALIDA/.test(m)) return "Essa ficha já foi concluída. Atualize a tela.";
+  if (/AJUSTE_INVALIDO/.test(m)) return "Uma das escolhas não vale para esta empresa. Confira e tente de novo.";
+  return "Não foi possível salvar. Nada foi alterado; tente novamente.";
+}
+
+/**
+ * Salva padrões do lote e/ou ajustes por ficha (rascunho). Nunca cria
+ * colaborador: só deixa a conferência preenchida para quem continuar.
+ */
+export function useAjustarLoteFicha() {
+  const qc = useQueryClient();
+  const { selectedCompanyId } = useCompanyContext();
+  return useMutation({
+    mutationFn: async (input: {
+      importacaoId: string;
+      /** `intervalo_reduzido_ciencia`: ciência única do lote (autor e data gravados pelo servidor). */
+      padroes?: EscolhasLote & { intervalo_reduzido_ciencia?: { justificativa: string; ciente: true } | null };
+      itens?: Record<string, AjusteFichaLote>;
+    }) => {
+      const { data, error } = await supabase.rpc("dp_ficha_lote_ajustar", {
+        p_importacao_id: input.importacaoId,
+        p_padroes: input.padroes ? (input.padroes as unknown as Json) : undefined,
+        p_itens: input.itens ? (input.itens as unknown as Json) : undefined,
+      });
+      if (error) throw new Error(mensagemAjuste(error));
+      return data as unknown as OrganizacaoLote;
+    },
+    onSuccess: (org, input) => {
+      // Mostra na hora o que foi salvo, sem esperar a nova leitura.
+      qc.setQueryData<FichaImportacao[]>(["dp_ficha_importacoes", selectedCompanyId], (rows) =>
+        rows?.map((r) => (r.id === input.importacaoId ? ({ ...r, organizacao: org } as FichaImportacao) : r)),
+      );
+      qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] });
+    },
+  });
+}
+
+export interface ResponsavelLote { user_id: string; nome: string; email: string; perfil: string; whatsapp: string | null }
+
+/** Donos/administradores da empresa que podem receber o lote (somente equipe Aveto). */
+export function useResponsaveisLote(importacaoId: string | null, habilitado: boolean) {
+  return useQuery({
+    queryKey: ["dp_ficha_lote_responsaveis", importacaoId],
+    enabled: !!importacaoId && habilitado,
+    queryFn: async (): Promise<ResponsavelLote[]> => {
+      const { data, error } = await supabase.rpc("dp_ficha_lote_responsaveis", { p_importacao_id: importacaoId! });
+      if (error) throw error;
+      return (data ?? []) as ResponsavelLote[];
+    },
+  });
+}
+
+export interface ResultadoRepasseLote {
+  fichas: number;
+  whatsapp: { enviado: boolean; final: string | null; erro: string | null };
+  email: { enviado: boolean; destino: string | null; erro: string | null };
+  mensagem: string;
+  link: string;
+  /** Número (com 55) para abrir a conversa manualmente quando o envio automático falhou. */
+  telefone_contingencia: string | null;
+}
+
+/** Passa o lote ao responsável da empresa, em nome da Aveto 360: aviso no sistema, WhatsApp e e-mail. */
+export function useNotificarLoteFicha() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({ importacaoId, userId, whatsapp }: { importacaoId: string; userId: string; whatsapp?: string | null }) => {
+      const { data, error } = await supabase.functions.invoke("dp-ficha-lote-notificar", {
+        body: { importacaoId, userId, whatsapp: whatsapp || null },
+      });
+      if (error) {
+        let msg = "Não foi possível enviar a notificação. Tente novamente.";
+        try {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const ctx = (error as any)?.context;
+          const body = ctx && typeof ctx.json === "function" ? await ctx.json() : null;
+          if (body?.error) msg = String(body.error);
+        } catch { /* mantém a mensagem padrão */ }
+        throw new Error(msg);
+      }
+      if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
+      return data as ResultadoRepasseLote;
+    },
+    onSuccess: () => qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] }),
+  });
+}
+
+/**
+ * Quantas fichas de cada envio ainda aguardam conferência, foram ignoradas ou
+ * já viraram cadastro. A chave começa com "dp_ficha_itens" para acompanhar as
+ * mesmas atualizações das fichas (aplicar, ignorar, reativar).
+ */
+export function useDpFichaResumoEnvios(importacaoIds: string[]) {
+  const { selectedCompanyId } = useCompanyContext();
+  return useQuery({
+    queryKey: ["dp_ficha_itens", selectedCompanyId, "__resumo", ...importacaoIds],
+    enabled: !!selectedCompanyId && importacaoIds.length > 0,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("dp_ficha_importacao_itens")
+        .select("importacao_id, status")
+        .eq("company_id", selectedCompanyId!)
+        .in("importacao_id", importacaoIds)
+        .limit(5000);
+      if (error) throw error;
+      return resumirEnvios((data ?? []) as Array<{ importacao_id: string; status: string }>);
     },
   });
 }

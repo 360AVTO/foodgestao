@@ -1,3 +1,4 @@
+import { podeReceberFolga } from "./folga-elegibilidade";
 // Quem pode receber um registro de ausência numa data: estava ativo no dia
 // (admitido até a data e não desligado antes dela) e ainda não tem ausência.
 export interface ColabAusencia {
@@ -7,6 +8,9 @@ export interface ColabAusencia {
   deleted_at?: string | null;
   unidade_id?: string | null;
   folga_fixa_semana?: number | null;
+  regime?: string | null;
+  forma_pagamento?: string | null;
+  vinculo_label?: string | null;
 }
 
 /** Ativo na data: admitido até ela e desligado só depois dela (ou no próprio dia). */
@@ -28,7 +32,15 @@ export function diaSemana(iso: string): number {
 }
 
 /** Motivos que só se aplicam a quem trabalharia no dia (nunca sócio, nunca quem folga). */
-export const MOTIVOS_SO_ESCALADOS = ["falta", "suspensao"] as const;
+export const MOTIVOS_SO_ESCALADOS = ["falta", "suspensao", "dispensa_feriado"] as const;
+
+/** Motivos que só existem quando a data é feriado da loja. */
+export const MOTIVOS_FERIADO = ["dispensa_feriado"] as const;
+
+/** Mostra o motivo só quando faz sentido: os de feriado exigem dia de feriado. */
+export function motivoDisponivelNoDia(motivo: string, ehFeriado: boolean): boolean {
+  return (MOTIVOS_FERIADO as readonly string[]).includes(motivo) ? ehFeriado : true;
+}
 
 export type GrupoAusencia = "escalados" | "folga" | "socios";
 
@@ -53,6 +65,9 @@ export function opcoesAusencia<T extends ColabAusencia>(
   return elegiveisParaAusencia(colabs, opts.data, opts.comAusencia)
     .filter((c) => c.unidade_id === opts.unidadeId)
     .map((c) => {
+      if (opts.motivo === "folga" && c.regime && !podeReceberFolga(c)) {
+        return { colab: c, grupo: opts.ehSocio(c) ? "socios" as const : "escalados" as const, bloqueio: "Use ausência ou indisponibilidade para este vínculo" };
+      }
       if (opts.ehSocio(c)) {
         return { colab: c, grupo: "socios" as const, bloqueio: soEscalados ? "Não se aplica a sócio" : null };
       }

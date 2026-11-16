@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { FranquiaColaboradoresAviso, useEstadoFranquia } from "@/components/billing/FranquiaColaboradoresAviso";
 import { useUpsertDpColaborador, useDpColaboradores, type DpColaborador } from "@/hooks/useDpColaboradores";
 import { type PessoaApoio } from "@/hooks/useDpPessoasApoio";
 import { divergenciasIsonomia, DIAS_BASE_PADRAO, type DivergenciaIsonomia } from "@/lib/dp/beneficios-regras";
@@ -145,6 +146,9 @@ import { cargoSugereVinculoSocio, compararRiscoCargo, textoRisco, type Divergenc
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
+import { AssinaturaPapelBadge, ModoAssinaturaCard } from "@/components/dp/assinatura/ModoAssinaturaCard";
+import { useDpModoAssinatura } from "@/hooks/useDpModoAssinatura";
+import { assinaEmPapelHoje } from "@/lib/dp/modo-assinatura";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { EnderecoFields, type EnderecoValor } from "@/components/shared/EnderecoFields";
 import {
@@ -402,6 +406,8 @@ export function ColaboradorFormDialog({
     if (!id) return null;
     return (todosColaboradores.data ?? []).find((c) => c.id === id) ?? colaborador ?? null;
   }, [colaborador, criadoId, todosColaboradores.data]);
+  const modoAssinatura = useDpModoAssinatura(admissao ? null : colaboradorAtual?.id ?? null);
+  const assinaPapel = assinaEmPapelHoje(modoAssinatura.data);
   /** Salvamento do horário de trabalho exposto pelo painel da aba. */
   const jornadaSalvarRef = useRef<(() => Promise<SalvarJornadaResultado>) | null>(null);
 
@@ -470,6 +476,8 @@ export function ColaboradorFormDialog({
 
 
   const isEdit = !!colaborador?.id;
+  // Franquia: aviso antes de preencher um cadastro novo (o rascunho continua disponível).
+  const avisoFranquia = useEstadoFranquia(open && !isEdit && !criadoId && !admissao ? selectedCompanyId : null);
 
   /** Rascunho guardado no sistema: vale só para cadastro novo. */
   const chaveRascunho = useMemo(
@@ -2362,6 +2370,7 @@ export function ColaboradorFormDialog({
                     : isEdit
                     ? `Editar: ${toUpperCadastro(form.nome) || "Colaborador"}`
                     : `Cadastrar: ${toUpperCadastro(form.nome) || "Novo Colaborador"}`}
+                  {assinaPapel && !admissao && <AssinaturaPapelBadge className="ml-2 align-middle text-[11px]" />}
                 </DialogTitle>
                 {(isEdit || criadoId) && !admissao && (
                   <Button
@@ -2378,6 +2387,7 @@ export function ColaboradorFormDialog({
 
               </div>
             </DialogHeader>
+            {avisoFranquia && <FranquiaColaboradoresAviso estado={avisoFranquia} className="mt-2" />}
             {admissao?.etapa}
             <div className="-mx-4 overflow-x-auto px-4 pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0 sm:pb-0">
             <TabsList className="w-max justify-start sm:w-full">
@@ -3039,6 +3049,13 @@ export function ColaboradorFormDialog({
               <div id="acesso-portal" className="scroll-mt-4">
                 <ColaboradorAcessoPanel colaborador={colaboradorAtual} />
               </div>
+              {!admissao && colaboradorAtual?.id && (
+                <ModoAssinaturaCard
+                  colaboradorId={colaboradorAtual.id}
+                  dataAdmissao={(colaboradorAtual as { data_admissao?: string | null }).data_admissao ?? null}
+                  semAcesso={!colaboradorAtual.whatsapp && !colaboradorAtual.telefone && !colaboradorAtual.email}
+                />
+              )}
             </div>
           )}
 

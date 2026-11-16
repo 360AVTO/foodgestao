@@ -12,6 +12,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Link } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { MfaChallenge } from "@/components/auth/MfaChallenge";
+import { BotaoBaixarAppLogin } from "@/components/pwa/BotaoBaixarAppLogin";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { ReclameAquiSeal } from "@/components/marketing/ReclameAquiSeal";
 import { useTurnstileConfig } from "@/hooks/useTurnstileSiteKey";
@@ -464,7 +465,15 @@ export default function Auth() {
               toast.success("Cadastro realizado!", {
                 description: "Confirme pelo código enviado ao seu WhatsApp.",
               });
-              if (userId) void enviarOtp(whatsapp, userId, email.trim());
+              if (userId) {
+                void enviarOtp(whatsapp, userId, email.trim()).then((ok) => {
+                  // Falha no WhatsApp: salta direto para a confirmação por e-mail (o link já foi enviado).
+                  if (!ok) {
+                    setMode("confirm-email");
+                    toast.info("Confirme pelo e-mail", { description: "Não conseguimos enviar o código no WhatsApp. Enviamos um link de confirmação para o seu e-mail." });
+                  }
+                });
+              }
             } else {
               toast.success("Cadastro realizado!");
               const consumed = await consumePendingInviteToken();
@@ -552,6 +561,9 @@ export default function Auth() {
         >
           <ArrowLeft className="h-4 w-4" aria-hidden="true" /> Voltar ao site
         </Link>
+
+        {/* Celular sem o app instalado: atalho para baixar. */}
+        <BotaoBaixarAppLogin />
 
         {/* Celular: o cartão é ancorado na base da arte de fundo (a imagem
             941x1672 é desenhada com object-contain/object-top, então sua altura
@@ -801,7 +813,7 @@ export default function Auth() {
 
             {isSignup && (
               <div className="space-y-1">
-                <Label htmlFor="whatsapp">WhatsApp</Label>
+                <Label htmlFor="whatsapp">Seu WhatsApp pessoal</Label>
                 <div className="relative">
                   <Phone className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -822,7 +834,7 @@ export default function Auth() {
                 {errors.whatsapp ? (
                   <p id="erro-whatsapp" role="alert" className="text-xs text-destructive">{errors.whatsapp}</p>
                 ) : (
-                  <p id="dica-whatsapp" className="text-xs text-muted-foreground">Enviaremos um código para confirmar sua conta.</p>
+                  <p id="dica-whatsapp" className="text-xs text-muted-foreground">O celular que está com você: o código de confirmação chega nele agora. O telefone da empresa você informa depois.</p>
                 )}
               </div>
             )}

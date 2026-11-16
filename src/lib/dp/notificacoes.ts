@@ -18,6 +18,9 @@ export const NOTIFICACAO_ORIGEM_LABEL: Record<string, string> = {
   companies: "Disponibilidade",
   dp_elogios: "Reconhecimento",
   dp_desligamento_processos: "Desligamento",
+  dp_ficha_importacoes: "Fichas de registro",
+  dp_adiantamento_solicitacoes: "Adiantamento",
+  dp_adiantamento_relacao: "Adiantamento",
 };
 
 export function notificacaoOrigemLabel(refTable: string | null | undefined): string {
@@ -39,6 +42,9 @@ export const NOTIFICACAO_PATH_GESTOR: Record<string, string> = {
   dp_ferias_gozos: "/dp/ferias",
   dp_folgas: "/dp/folgas",
   dp_desligamento_processos: "/dp/colaboradores",
+  dp_ficha_importacoes: "/dp/colaboradores/importar-ficha",
+  dp_adiantamento_solicitacoes: "/dp/adiantamentos",
+  dp_adiantamento_relacao: "/dp/adiantamentos",
 };
 
 export function notificacaoPathGestor(refTable: string | null | undefined, refId?: string | null, colaboradorId?: string | null): string {
@@ -48,8 +54,13 @@ export function notificacaoPathGestor(refTable: string | null | undefined, refId
   if (refTable === "dp_desligamento_processos" && colaboradorId) {
     return `${base}?editar=${encodeURIComponent(colaboradorId)}&aba=desligamento`;
   }
+  // Lote de fichas: abre a conferência daquele envio.
+  if (refTable === "dp_ficha_importacoes" && refId) return `${base}?lote=${encodeURIComponent(refId)}`;
   // Troca: abre direto o detalhe da troca envolvida.
   if (refTable === "dp_trocas" && refId) return `${base}&troca_id=${encodeURIComponent(refId)}`;
+  // Adiantamento: abre a relação do mês do pedido (ou da unidade avisada).
+  if (refTable === "dp_adiantamento_solicitacoes" && refId) return `${base}?solicitacao=${encodeURIComponent(refId)}`;
+  if (refTable === "dp_adiantamento_relacao" && refId) return `${base}?unidade=${encodeURIComponent(refId)}`;
   // Ocorrência: abre direto o dia/colaborador e a tratativa da ocorrência.
   if (refTable === "dp_ocorrencias" && refId) return `${base}?id=${encodeURIComponent(refId)}`;
   return base;
@@ -98,4 +109,21 @@ export function notificacaoLida(
   if (n.lida_em) return true;
   if (n.user_id) return false; // pessoal sem lida_em => não lida
   return leiturasIds.has(notificacaoId);
+}
+
+type NotificacaoAudienciaInput = { user_id: string | null; para_admins: boolean | null };
+
+/**
+ * Quem vê cada notificação. Gestão: avisos administrativos compartilhados e os
+ * pessoais do próprio usuário. Portal: somente os pessoais do próprio usuário.
+ * Mensagens pessoais de outro colaborador ("Sua troca foi recusada") nunca
+ * aparecem para quem não é o destinatário, mesmo que a permissão de leitura alcance a linha.
+ */
+export function notificacaoNaAudiencia(
+  n: NotificacaoAudienciaInput,
+  opts: { variant: "admin" | "portal"; userId: string | null | undefined },
+): boolean {
+  if (!opts.userId) return false;
+  if (n.user_id) return n.user_id === opts.userId;
+  return opts.variant === "admin" && n.para_admins === true;
 }

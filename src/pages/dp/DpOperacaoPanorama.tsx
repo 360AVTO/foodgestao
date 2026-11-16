@@ -1,7 +1,9 @@
+import { EquipePessoaCard } from "@/components/dp/calendario/EquipePessoaCard";
 import { FeriadosDia } from "@/components/dp/FeriadoCategoriaBadge";
 import { PrazosRescisao } from "@/components/dp/calendario/PrazosRescisao";
 import { IniciosTrabalho } from "@/components/dp/calendario/IniciosTrabalho";
 import { RegistrarTrocaGestorDialog } from "@/components/dp/trocas/RegistrarTrocaGestorDialog";
+import { FeriadoLojaFechadaToggle, LojaSemExpedienteSelo } from "@/components/dp/FeriadoLojaFechadaToggle";
 import { textoFeriadosDia } from "@/lib/dp/feriados-apresentacao";
 import { Fragment, type ReactNode } from "react";
 import { useIsMobile } from "@/hooks/use-mobile";
@@ -69,7 +71,8 @@ import {
   type PessoaAvulsaPanorama,
   type PessoaPanorama,
 } from "@/lib/dp/operacao-panorama";
-import { TIPO_LABEL, ESTADO_LABEL, TIPOS_PREVISAO } from "@/lib/dp/ocorrencias";
+import { TIPO_LABEL, ESTADO_LABEL, TIPOS_PREVISAO, rotuloTipoOcorrencia } from "@/lib/dp/ocorrencias";
+import { AusenciaDetalheSheet } from "@/components/dp/calendario/AusenciaDetalheSheet";
 import { DpPessoaAvulsaDialog } from "@/components/dp/DpPessoaAvulsaDialog";
 import { previsaoNoDia, type PrevisaoNoDia } from "@/lib/dp/operacao-extra";
 import type { PessoaAvulsaInput } from "@/hooks/useDpOperacaoPanorama";
@@ -86,6 +89,8 @@ import { DpErrorState } from "@/components/dp/DpErrorState";
 import { DpStatCard } from "@/components/dp/DpStatCard";
 import { DpTabsBar } from "@/components/dp/DpTabsBar";
 import { DiasEmLista } from "@/components/dp/DiasEmLista";
+import { PagamentosDoDia, PilulaPagamento } from "@/components/dp/calendario/PagamentosDia";
+import { useDpPagamentosMarcos } from "@/hooks/useDpPagamentosMarcos";
 import { Tabs, TabsContent, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Lock, MoreHorizontal } from "lucide-react";
@@ -426,6 +431,7 @@ interface DetalheDiaProps {
   onContagemTurno?: (c: { n: number; turno: string } | null) => void;
   acoesFolga?: (colaboradorId: string, folgaFixa: boolean) => React.ReactNode;
   onRegistrarAusencia?: (colaboradorId: string) => void;
+  onRegistrarTroca?: (colaboradorId: string) => void;
 }
 
 /** Sócio ausente sem obrigação CLT: exibido com tag própria. */
@@ -472,6 +478,7 @@ function DetalheDiaOperacao({
   onContagemTurno,
   acoesFolga,
   onRegistrarAusencia,
+  onRegistrarTroca,
 }: DetalheDiaProps) {
   const navigate = useNavigate();
 
@@ -481,6 +488,8 @@ function DetalheDiaOperacao({
     ),
   );
   const ausReg = ausenciasRegistradas.filter((a) => a.inicio <= data && a.fim >= data);
+  const pagamentos = useDpPagamentosMarcos(data.slice(0, 7), unidadeId);
+  const pagamentosDia = pagamentos.porData.get(data) ?? [];
   const rotuloAus = (t: string) => (t === "adiantamento" ? "Adiantamento" : t === "outros" ? "Ausência" : t === "indisponibilidade" ? "Indisponibilidade" : t);
   const avulsosDoDia = avulsos.filter((a) => a.data_inicio <= data && a.data_fim >= data);
 
@@ -516,6 +525,7 @@ function DetalheDiaOperacao({
     void melhor; return periodoInicial ?? "todos";
   }, [contagemPeriodos, periodoInicial]);
   // Escolha do gestor vale para o dia aberto; ao trocar de dia volta ao turno mais cheio.
+  const [ausenciaDetalhe, setAusenciaDetalhe] = useState<{ id: string | null; nome: string; afastamento?: { titulo: string; inicio: string; fim: string; motivo?: string | null } } | null>(null);
   const [escolhaPeriodo, setEscolhaPeriodo] = useState<{ data: string; p: "todos" | "dia" | "noite" | "madrugada" } | null>(null);
   const periodo = escolhaPeriodo?.data === data ? escolhaPeriodo.p : periodoPadrao;
   const setPeriodo = (p: "todos" | "dia" | "noite" | "madrugada") => setEscolhaPeriodo({ data, p });
@@ -558,7 +568,10 @@ function DetalheDiaOperacao({
 
   if (resumoInicio) return (
     <div className="space-y-2">
-      {diaEhPico(data, dia.feriado_nome) && <span className="inline-flex items-center gap-1 text-xs font-semibold text-warning-foreground"><Flame className="h-3.5 w-3.5 fill-warning text-warning" />Pico de operação</span>}
+      {(diaEhPico(data, dia.feriado_nome) || pagamentosDia.length > 0) && <div className="flex flex-wrap items-center gap-1.5">
+        {diaEhPico(data, dia.feriado_nome) && <span className="inline-flex items-center gap-1 text-xs font-semibold text-warning-foreground"><Flame className="h-3.5 w-3.5 fill-warning text-warning" />Pico de operação</span>}
+        {pagamentosDia.map((m) => <PilulaPagamento key={m.tipo} marco={m} />)}
+      </div>}
       {[...contagemPeriodos].map(([per, quantidade]) => {
         const fora = foraDaOperacao.filter((p) => periodoPessoa(p) === per);
         const Icon = per === "dia" ? Sun : Moon;
@@ -583,6 +596,7 @@ function DetalheDiaOperacao({
           <Flame className="h-3.5 w-3.5" /> Pico de operação
         </div>
       )}
+      {pagamentosDia.length > 0 && <PagamentosDoDia marcos={pagamentosDia} className="w-full" />}
       {contagemPeriodos.size > 1 && (
         <div className="inline-flex flex-wrap gap-1 rounded-full border bg-muted/40 p-1" role="tablist" aria-label="Turno do dia">
           {([
@@ -733,7 +747,7 @@ function DetalheDiaOperacao({
                   .sort((a, b) => Number(a.pessoas.length > 1) - Number(b.pessoas.length > 1) || a.pessoas.length - b.pessoas.length)
                   .map((g) => (
                   <div key={g.setor_id ?? g.cargo_id ?? "sem-grupo"} className="min-w-0">
-                <p className="mb-2 flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-muted-foreground">
+                <p className="mb-2 flex items-center gap-2 text-[11px] font-semibold text-muted-foreground">
                       <span className="h-1.5 w-1.5 rounded-full bg-primary" />
                       {g.cargo_nome}
                       <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">{g.pessoas.length}</span>
@@ -742,104 +756,23 @@ function DetalheDiaOperacao({
                         {g.pessoas.map((p) => (
                           <li
                             key={`${p.colaborador_id}-${p.categoria}-${p.ocorrencia_id ?? p.avulso_id ?? ""}`}
-                            className="min-w-0 space-y-1 px-1 py-2 hover:bg-muted/30 md:py-1.5"
+                            className="min-w-0 px-1 py-1"
                           >
-                            {/* Linha 1: nome + vínculo */}
-                            <div className="flex min-w-0 items-center justify-between gap-2">
-                              <p className="min-w-0 flex-1 truncate text-sm font-bold" title={p.nome}>{p.nome}</p>
-                              {onRegistrarAusencia && !p.avulso_id && (
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="h-9 w-9 shrink-0 text-calendar-falta"
-                                  aria-label={`Registrar ausência de ${p.nome}`}
-                                  title="Registrar ausência"
-                                  onClick={() => onRegistrarAusencia(p.colaborador_id)}
-                                >
-                                  <UserX className="h-4 w-4" />
-                                </Button>
-                              )}
-                              {p.aguardando_registro && (
-                                <span
-                                  className="shrink-0 rounded-full border border-amber-500/50 bg-amber-500/10 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-500"
-                                  title="Pré-admissão ativa na rotina como freelancer provisório, aguardando a admissão oficial."
-                                >
-                                  Aguardando admissão
-                                </span>
-                              )}
-                              <span className={cn(
-                                "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-                                vinculoPessoa(p, regimes) === "Fixo" ? "bg-primary/10 text-primary" : "bg-foreground text-background",
-                              )}>
-                                {vinculoPessoa(p, regimes)}
-                              </span>
-                            </div>
-                            {/* Linha 2: cargo + setor do dia */}
-                            <div className="flex min-w-0 items-center justify-between gap-2">
-                              <p className="min-w-0 truncate text-xs text-muted-foreground">{p.cargo_nome ?? "Sem cargo"}</p>
-                              {usaSetores && (() => {
-                                const alterado = setorDiaDivergeDoHabitual(p.setor_origem ?? "nenhum", p.setor_id, p.setor_habitual_id);
-                                const cls = cn(
-                                  "inline-flex max-w-[55%] shrink-0 items-center gap-1 truncate rounded-full border px-2 py-0.5 text-[11px] font-semibold",
-                                  alterado ? "border-primary/50 bg-primary/10 text-primary" : p.setor_id ? "border-border bg-muted/50" : "border-dashed text-muted-foreground",
-                                );
-                                const conteudo = (
-                                  <>
-                                    {alterado ? <ArrowLeftRight className="h-3 w-3 shrink-0" /> : !p.setor_id ? <AlertTriangle className="h-3 w-3 shrink-0" /> : null}
-                                    <span className="truncate">{p.setor_nome ?? SETOR_NAO_DEFINIDO_LABEL}</span>
-                                  </>
-                                );
-                                return onAlterarSetor ? (
-                                  <Button
-                                    variant="ghost"
-                                    type="button"
-                                    className={cn(cls, "h-7 cursor-pointer hover:border-primary hover:bg-primary/15")}
-                                    title="Toque para alterar o setor deste dia"
-                                    aria-label={`Setor ${p.setor_nome ?? "não definido"}. Alterar setor deste dia`}
-                                    onClick={() => onAlterarSetor(p, data)}
-                                  >
-                                    {conteudo}
-                                    <Pencil className="h-3 w-3 shrink-0 opacity-60" aria-hidden="true" />
-                                  </Button>
-                                ) : (
-                                  <span className={cls}>{conteudo}</span>
-                                );
-                              })()}
-                            </div>
-                            {/* Linha 3: horário (carga) */}
-                            <div className="flex min-w-0 flex-wrap items-center justify-between gap-1">
-                              <p className="text-xs font-medium tabular-nums">
-                                {p.entrada ?? "--:--"} – {p.saida ?? "--:--"}{" "}
-                                <span className="text-muted-foreground">({formatarHoras(p.carga_prevista_horas)})</span>
-                              </p>
-                              {compacto && podeRegistrar && p.avulso_id && (() => {
-                                const reg = avulsos.find((a) => a.id === p.avulso_id);
-                                return reg ? (
-                                  <span className="flex gap-1">
-                                    <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => onEditarAvulsa(reg)}>Editar</Button>
-                                    <ConfirmarAcaoDialog
-                                      titulo="Remover do dia?"
-                                      descricao={`${reg.nome ?? "A pessoa"} deixará de constar neste dia.`}
-                                      confirmar="Remover"
-                                      cancelar="Cancelar"
-                                      onConfirm={() => onExcluirAvulsa(reg)}
-                                    >
-                                      <Button variant="ghost" size="sm" className="h-7 px-2 text-xs">Remover</Button>
-                                    </ConfirmarAcaoDialog>
-                                  </span>
-                                ) : null;
-                              })()}
-                            </div>
-                            {p.ocorrencias?.length ? (
-                              <div className="flex flex-wrap items-center gap-1">
-                                <OcorrenciaBadges ocorrencias={p.ocorrencias} />
-                                <Button variant="link" size="sm" className="h-auto p-0 text-xs"
-                                  onClick={() => navigate(`/dp/ocorrencias?colaborador=${p.colaborador_id}&data=${data}`)}>
-                                  Ver ocorrências
-                                </Button>
-                              </div>
-                            ) : null}
+                            <EquipePessoaCard
+                              pessoa={p}
+                              data={data}
+                              vinculo={vinculoPessoa(p, regimes)}
+                              unidade={nomeUnidade ?? bloco.unidade_nome ?? null}
+                              telefoneExtra={avulsos.find((a) => a.id === p.avulso_id)?.telefone}
+                              onAusencia={!p.avulso_id && onRegistrarAusencia ? () => onRegistrarAusencia(p.colaborador_id) : undefined}
+                              onTroca={!p.avulso_id && onRegistrarTroca ? () => onRegistrarTroca(p.colaborador_id) : undefined}
+                              onSetor={usaSetores && onAlterarSetor ? () => onAlterarSetor(p, data) : undefined}
+                              onEditarExtra={podeRegistrar && p.avulso_id ? () => {
+                                const registro = avulsos.find((a) => a.id === p.avulso_id);
+                                if (registro) onEditarAvulsa(registro);
+                              } : undefined}
+                            />
+                            {p.ocorrencias?.length ? <OcorrenciaBadges ocorrencias={p.ocorrencias} /> : null}
                         </li>
                       ))}
                     </ul>
@@ -958,6 +891,7 @@ function DetalheDiaOperacao({
 
 
 
+      <AusenciaDetalheSheet open={!!ausenciaDetalhe} ocorrenciaId={ausenciaDetalhe?.id ?? null} afastamento={ausenciaDetalhe?.afastamento} nome={ausenciaDetalhe?.nome ?? ""} onOpenChange={(o) => { if (!o) setAusenciaDetalhe(null); }} />
       <div className="min-w-0" aria-label="Ausências do dia">
       {(() => {
         // Indisponíveis para convocação no dia; se aceitou convocação (está na escala), a indisponibilidade é desconsiderada.
@@ -979,13 +913,28 @@ function DetalheDiaOperacao({
                   ? `Coberto por ${p.coberto_por_nome}`
                   : p.folga_rotulo ? p.folga_rotulo : p.folga_troca && (p.categoria === "folga_padrao" || p.categoria === "folga_extra")
                     ? "Folga por Troca"
-                    : CATEGORIA_LABEL[p.categoria];
+                    : p.ocorrencias?.[0] && ["ausente", "atestado", "ferias"].includes(p.categoria)
+                      ? rotuloTipoOcorrencia(p.ocorrencias[0])
+                      : CATEGORIA_LABEL[p.categoria];
+                const detalheId = p.categoria !== "folga_extra" && p.categoria !== "folga_padrao" ? p.ocorrencia_id ?? p.ocorrencias?.[0]?.id : undefined;
+                const afastamento = !detalheId && reg && (p.categoria === "ferias" || p.categoria === "atestado")
+                  ? { titulo: tipo, inicio: reg.inicio, fim: reg.fim, motivo: reg.motivo ?? null } : undefined;
+                const abrir = detalheId || afastamento ? () => setAusenciaDetalhe({ id: detalheId ?? null, nome: p.nome, afastamento }) : undefined;
                 const extra = reg && reg.fim !== reg.inicio ? ` · até ${reg.fim.split("-").reverse().join("/")}` : "";
                 return (
-                  <li key={p.ocorrencia_id ?? p.colaborador_id} className="flex min-w-0 items-center gap-2 py-2">
+                  <li
+                    key={p.ocorrencia_id ?? p.colaborador_id}
+                    className={`flex min-w-0 items-center gap-2 py-2 ${abrir ? "min-h-11 cursor-pointer rounded-md hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" : ""}`}
+                    {...(abrir ? {
+                      role: "button", tabIndex: 0, "aria-label": `Ver detalhes: ${p.nome} · ${tipo}`,
+                      onClick: abrir,
+                      onKeyDown: (e: React.KeyboardEvent) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); abrir(); } },
+                    } : {})}
+                  >
                     <span aria-hidden="true" className="shrink-0 text-sm leading-none">{tagSocio(p) ? "🤝" : ICONE[p.categoria] ?? "•"}</span>
                     <span className="min-w-0 truncate text-sm font-medium" title={[p.nome, reg?.motivo].filter(Boolean).join(" · ")}>{primeiroNome(p.nome)}</span>
                     <span className="min-w-0 flex-1 text-xs text-muted-foreground">{tagSocio(p) ? "Folga Sócio" : tipo}{extra}</span>
+                    {abrir && <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />}
                     {acoesFolga && (p.categoria === "folga_extra" || p.categoria === "folga_padrao") && (
                       <div className="flex shrink-0 items-center gap-1">{acoesFolga(p.colaborador_id, p.categoria === "folga_padrao")}</div>
                     )}
@@ -1483,6 +1432,7 @@ export default function DpOperacaoPanorama({
                 periodosHabituais={periodosHab}
                 onContagemTurno={setContagemTurno}
                 onRegistrarAusencia={podeRegistrar ? (id) => abrirAusenciaPessoa(dataDoDetalhe, id) : undefined}
+                onRegistrarTroca={podeRegistrar ? (id) => abrirTrocaGestor(dataDoDetalhe, id) : undefined}
                 acoesFolga={companyIdCal && podeRegistrar ? (id, fixa) => (
                   <FolgasDoDiaPainel
                     companyId={companyIdCal}
@@ -1728,6 +1678,8 @@ export default function DpOperacaoPanorama({
               {...propsAvulsas}
               {...propsSetor}
               onRegistrarAusencia={podeRegistrar ? (id) => abrirAusenciaPessoa(data, id) : undefined}
+              onRegistrarTroca={podeRegistrar ? (id) => abrirTrocaGestor(data, id) : undefined}
+              regimes={regimesColab}
               acoesFolga={companyIdCal && podeRegistrar ? (id, fixa) => (
                 <FolgasDoDiaPainel
                   companyId={companyIdCal}
@@ -2003,16 +1955,18 @@ export default function DpOperacaoPanorama({
       </Tabs>
       </>}
 
-      {inicioEmLinha && <PrazosRescisao data={data} unidadeId={unidadeId} />}
+      {inicioEmLinha && <PrazosRescisao data={data} unidadeId={unidadeId} compacto />}
       {inicioEmLinha && <IniciosTrabalho data={data} unidadeId={unidadeId} />}
       {inicioEmLinha && <section className="space-y-2" aria-label="Visão oficial do dia">
         {dia && <>
           <div className="flex flex-wrap items-center gap-1 rounded-xl border border-primary/20 bg-calendar-day-header px-2 py-1.5 text-xs text-calendar-header-foreground">
             <div className="flex min-w-0 flex-[1_1_180px] items-center gap-1">{inicioCabecalho}</div>
+            {unidadeId && <LojaSemExpedienteSelo unidadeId={unidadeId} data={data} feriadoNome={dia.feriado_nome ?? undefined} />}
             <span className="ml-auto inline-flex shrink-0 items-center gap-1" title={`${dia.trabalhando} trabalhando${dia.aguardando > 0 ? ` · ${dia.aguardando} aguardando` : ""}`} aria-label={`${dia.trabalhando} trabalhando`}><Users className="h-3.5 w-3.5" /><strong>{dia.trabalhando}</strong></span>
             <Popover open={acoesInicioOpen} onOpenChange={setAcoesInicioOpen}><PopoverTrigger asChild><Button size="sm" className="h-8 shrink-0 gap-1 rounded-full bg-primary px-3 text-xs font-semibold text-primary-foreground shadow-sm hover:bg-primary/90" aria-label="Ações do calendário"><MoreHorizontal className="h-4 w-4" />Ações</Button></PopoverTrigger>
               <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-1 rounded-xl p-2">
                 {podeRegistrar && <>
+                  {unidadeId && <FeriadoLojaFechadaToggle unidadeId={unidadeId} data={data} feriadoNome={dia.feriado_nome ?? undefined} />}
                   <Button variant="ghost" className="h-10 w-full justify-start gap-2 text-xs" onClick={() => { setAcoesInicioOpen(false); setAusenciaData(data); setAusenciaMotivo(undefined); setAusenciaOpen(true); }}><Plus className="h-4 w-4 text-calendar-falta" />Registrar Ausência</Button>
                   <Button variant="ghost" className="h-10 w-full justify-start gap-2 text-xs" onClick={() => { setAcoesInicioOpen(false); abrirNovaAvulsa(data); }}><UserPlus className="h-4 w-4 text-primary" />Mão de Obra Extra</Button>
                 </>}
@@ -2061,11 +2015,13 @@ export default function DpOperacaoPanorama({
               {diaPopout?.feriado_nome && (
                 <FeriadosDia dia={diaPopout} />
               )}
+              {diaPopout && dataPopout && unidadeId && <span className="ml-1 inline-flex align-middle"><LojaSemExpedienteSelo unidadeId={unidadeId} data={dataPopout} feriadoNome={diaPopout.feriado_nome ?? undefined} /></span>}
             </DialogDescription>
             {dataPopout && diaPopout && (
               <Popover><PopoverTrigger asChild><Button size="sm" className="h-8 rounded-full px-3 text-xs"><MoreHorizontal className="mr-1 h-4 w-4" />Ações</Button></PopoverTrigger>
                 <PopoverContent align="end" className="w-80 max-w-[calc(100vw-2rem)] space-y-1 rounded-xl p-2">
                   {podeRegistrar && <>
+                    {unidadeId && <FeriadoLojaFechadaToggle unidadeId={unidadeId} data={dataPopout} feriadoNome={diaPopout.feriado_nome ?? undefined} />}
                     <Button variant="ghost" className="h-10 w-full justify-start gap-2 text-xs" onClick={() => abrirTrocaGestor(dataPopout)}><ArrowLeftRight className="h-4 w-4" />Registrar troca</Button>
                     <Button variant="ghost" className="h-10 w-full justify-start gap-2 text-xs" onClick={() => { setAusenciaData(dataPopout); setAusenciaMotivo(undefined); setAusenciaOpen(true); }}><Plus className="h-4 w-4 text-calendar-falta" />Registrar Ausência</Button>
                     <Button variant="ghost" className="h-10 w-full justify-start gap-2 text-xs" onClick={() => abrirNovaAvulsa(dataPopout)}><UserPlus className="h-4 w-4 text-primary" />Mão de Obra Extra</Button>

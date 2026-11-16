@@ -39,6 +39,10 @@
     --warning: 38 92% 52%;
     --warning-foreground: 38 90% 15%;
 
+    /* Azul informativo — blocos de base legal/referência. */
+    --info: 205 85% 36%;
+    --info-foreground: 0 0% 100%;
+
     --border: 150 12% 88%;
     --input: 150 12% 88%;
     --ring: 141 98% 34%;
@@ -131,6 +135,9 @@
     --warning: 38 82% 50%;
     --warning-foreground: 38 90% 96%;
 
+    --info: 205 80% 62%;
+    --info-foreground: 205 60% 10%;
+
     --border: 155 16% 19%;
     --input: 155 16% 19%;
     --ring: 141 90% 42%;
@@ -183,6 +190,14 @@
 }
 
 @layer utilities {
+  /* Rolagem lateral por toque, sem a barra cinza do navegador. */
+  .scrollbar-none {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .scrollbar-none::-webkit-scrollbar {
+    display: none;
+  }
   .font-display {
     font-family: 'Poppins', 'Inter', sans-serif;
     letter-spacing: -0.01em;

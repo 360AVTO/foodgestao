@@ -3115,6 +3115,77 @@ export type Database = {
           },
         ]
       }
+      concierge_provisionamentos: {
+        Row: {
+          ativado_em: string | null
+          ativado_user_id: string | null
+          company_id: string
+          conta_existente: boolean
+          criado_em: string
+          criado_por: string
+          email_enviado_em: string | null
+          entrega_resumo: Json | null
+          gestor_email: string | null
+          gestor_nome: string
+          gestor_whatsapp: string | null
+          invite_grupo_id: string | null
+          invite_id: string | null
+          link_aberto_em: string | null
+          modo: string
+          modulos: string[]
+          parametrizacao_concluida_em: string | null
+          whatsapp_enviado_em: string | null
+        }
+        Insert: {
+          ativado_em?: string | null
+          ativado_user_id?: string | null
+          company_id: string
+          conta_existente?: boolean
+          criado_em?: string
+          criado_por: string
+          email_enviado_em?: string | null
+          entrega_resumo?: Json | null
+          gestor_email?: string | null
+          gestor_nome: string
+          gestor_whatsapp?: string | null
+          invite_grupo_id?: string | null
+          invite_id?: string | null
+          link_aberto_em?: string | null
+          modo?: string
+          modulos: string[]
+          parametrizacao_concluida_em?: string | null
+          whatsapp_enviado_em?: string | null
+        }
+        Update: {
+          ativado_em?: string | null
+          ativado_user_id?: string | null
+          company_id?: string
+          conta_existente?: boolean
+          criado_em?: string
+          criado_por?: string
+          email_enviado_em?: string | null
+          entrega_resumo?: Json | null
+          gestor_email?: string | null
+          gestor_nome?: string
+          gestor_whatsapp?: string | null
+          invite_grupo_id?: string | null
+          invite_id?: string | null
+          link_aberto_em?: string | null
+          modo?: string
+          modulos?: string[]
+          parametrizacao_concluida_em?: string | null
+          whatsapp_enviado_em?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "concierge_provisionamentos_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: true
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       contact_companies: {
         Row: {
           company_id: string
@@ -3653,6 +3724,8 @@ export type Database = {
           id: string
           observacao: string | null
           origem: string
+          termo_documento_id: string | null
+          termo_modo: string | null
           tipo: string
           updated_at: string
         }
@@ -3666,6 +3739,8 @@ export type Database = {
           id?: string
           observacao?: string | null
           origem?: string
+          termo_documento_id?: string | null
+          termo_modo?: string | null
           tipo: string
           updated_at?: string
         }
@@ -3679,6 +3754,8 @@ export type Database = {
           id?: string
           observacao?: string | null
           origem?: string
+          termo_documento_id?: string | null
+          termo_modo?: string | null
           tipo?: string
           updated_at?: string
         }
@@ -3702,6 +3779,13 @@ export type Database = {
             columns: ["company_id"]
             isOneToOne: false
             referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dp_adiantamento_solicitacoes_termo_documento_id_fkey"
+            columns: ["termo_documento_id"]
+            isOneToOne: false
+            referencedRelation: "dp_documentos"
             referencedColumns: ["id"]
           },
         ]
@@ -5837,6 +5921,8 @@ export type Database = {
           company_id: string
           compoe_equipe_habitual: boolean
           created_at: string
+          data_primeiro_plantao: string | null
+          escala_modelo: string
           folga_fixa_dow: number | null
           folga_variavel: boolean
           id: string
@@ -5853,6 +5939,8 @@ export type Database = {
           company_id: string
           compoe_equipe_habitual?: boolean
           created_at?: string
+          data_primeiro_plantao?: string | null
+          escala_modelo?: string
           folga_fixa_dow?: number | null
           folga_variavel?: boolean
           id?: string
@@ -5869,6 +5957,8 @@ export type Database = {
           company_id?: string
           compoe_equipe_habitual?: boolean
           created_at?: string
+          data_primeiro_plantao?: string | null
+          escala_modelo?: string
           folga_fixa_dow?: number | null
           folga_variavel?: boolean
           id?: string
@@ -6360,6 +6450,67 @@ export type Database = {
             columns: ["jornada_id"]
             isOneToOne: false
             referencedRelation: "dp_jornadas"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dp_colaborador_modo_assinatura: {
+        Row: {
+          colaborador_id: string
+          company_id: string
+          created_at: string
+          created_by: string | null
+          documentos_convertidos: number
+          id: string
+          modo: string
+          motivo: string | null
+          origem: string
+          vigente_desde: string
+        }
+        Insert: {
+          colaborador_id: string
+          company_id: string
+          created_at?: string
+          created_by?: string | null
+          documentos_convertidos?: number
+          id?: string
+          modo: string
+          motivo?: string | null
+          origem?: string
+          vigente_desde: string
+        }
+        Update: {
+          colaborador_id?: string
+          company_id?: string
+          created_at?: string
+          created_by?: string | null
+          documentos_convertidos?: number
+          id?: string
+          modo?: string
+          motivo?: string | null
+          origem?: string
+          vigente_desde?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dp_colaborador_modo_assinatura_colaborador_id_fkey"
+            columns: ["colaborador_id"]
+            isOneToOne: false
+            referencedRelation: "dp_colaboradores"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dp_colaborador_modo_assinatura_colaborador_id_fkey"
+            columns: ["colaborador_id"]
+            isOneToOne: false
+            referencedRelation: "dp_colaboradores_public"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dp_colaborador_modo_assinatura_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
             referencedColumns: ["id"]
           },
         ]
@@ -6860,6 +7011,7 @@ export type Database = {
           folga_janela_abre_dia: number
           folga_janela_ativa: boolean
           folga_janela_fecha_dia: number
+          folga_marcacao_portal: boolean
           folgas_fds_por_mes: number
           id: string
           modo_domingo: string
@@ -6924,6 +7076,7 @@ export type Database = {
           folga_janela_abre_dia?: number
           folga_janela_ativa?: boolean
           folga_janela_fecha_dia?: number
+          folga_marcacao_portal?: boolean
           folgas_fds_por_mes?: number
           id?: string
           modo_domingo?: string
@@ -6988,6 +7141,7 @@ export type Database = {
           folga_janela_abre_dia?: number
           folga_janela_ativa?: boolean
           folga_janela_fecha_dia?: number
+          folga_marcacao_portal?: boolean
           folgas_fds_por_mes?: number
           id?: string
           modo_domingo?: string
@@ -8987,6 +9141,8 @@ export type Database = {
           arquivo_sha256: string | null
           arquivo_sha256_em: string | null
           assinatura_detectada: boolean | null
+          assinatura_dispensa_motivo: string | null
+          assinatura_dispensada_em: string | null
           assinatura_fisica: boolean
           ciclo_status: string
           colaborador_id: string | null
@@ -9048,6 +9204,8 @@ export type Database = {
           arquivo_sha256?: string | null
           arquivo_sha256_em?: string | null
           assinatura_detectada?: boolean | null
+          assinatura_dispensa_motivo?: string | null
+          assinatura_dispensada_em?: string | null
           assinatura_fisica?: boolean
           ciclo_status?: string
           colaborador_id?: string | null
@@ -9109,6 +9267,8 @@ export type Database = {
           arquivo_sha256?: string | null
           arquivo_sha256_em?: string | null
           assinatura_detectada?: boolean | null
+          assinatura_dispensa_motivo?: string | null
+          assinatura_dispensada_em?: string | null
           assinatura_fisica?: boolean
           ciclo_status?: string
           colaborador_id?: string | null
@@ -10075,6 +10235,7 @@ export type Database = {
           erro_mensagem: string | null
           fichas_identificadas: number
           id: string
+          organizacao: Json
           paginas_processadas: number
           status: string
           total_paginas: number
@@ -10092,6 +10253,7 @@ export type Database = {
           erro_mensagem?: string | null
           fichas_identificadas?: number
           id?: string
+          organizacao?: Json
           paginas_processadas?: number
           status?: string
           total_paginas?: number
@@ -10109,6 +10271,7 @@ export type Database = {
           erro_mensagem?: string | null
           fichas_identificadas?: number
           id?: string
+          organizacao?: Json
           paginas_processadas?: number
           status?: string
           total_paginas?: number
@@ -13574,6 +13737,7 @@ export type Database = {
       dp_sindicatos: {
         Row: {
           ativo: boolean
+          catalogo_id: string | null
           cnpj: string | null
           company_id: string
           contato_email: string | null
@@ -13588,6 +13752,7 @@ export type Database = {
         }
         Insert: {
           ativo?: boolean
+          catalogo_id?: string | null
           cnpj?: string | null
           company_id: string
           contato_email?: string | null
@@ -13602,6 +13767,7 @@ export type Database = {
         }
         Update: {
           ativo?: boolean
+          catalogo_id?: string | null
           cnpj?: string | null
           company_id?: string
           contato_email?: string | null
@@ -13616,6 +13782,13 @@ export type Database = {
         }
         Relationships: [
           {
+            foreignKeyName: "dp_sindicatos_catalogo_id_fkey"
+            columns: ["catalogo_id"]
+            isOneToOne: false
+            referencedRelation: "dp_sindicatos_catalogo"
+            referencedColumns: ["id"]
+          },
+          {
             foreignKeyName: "dp_sindicatos_company_id_fkey"
             columns: ["company_id"]
             isOneToOne: false
@@ -13623,6 +13796,54 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      dp_sindicatos_catalogo: {
+        Row: {
+          ativo: boolean
+          cnpj: string | null
+          contato_email: string | null
+          contato_telefone: string | null
+          created_at: string
+          data_base_mes: number | null
+          id: string
+          municipios: string[]
+          nome: string
+          origem: string
+          tipo: Database["public"]["Enums"]["dp_sindicato_tipo"]
+          uf: string | null
+          updated_at: string
+        }
+        Insert: {
+          ativo?: boolean
+          cnpj?: string | null
+          contato_email?: string | null
+          contato_telefone?: string | null
+          created_at?: string
+          data_base_mes?: number | null
+          id?: string
+          municipios?: string[]
+          nome: string
+          origem?: string
+          tipo: Database["public"]["Enums"]["dp_sindicato_tipo"]
+          uf?: string | null
+          updated_at?: string
+        }
+        Update: {
+          ativo?: boolean
+          cnpj?: string | null
+          contato_email?: string | null
+          contato_telefone?: string | null
+          created_at?: string
+          data_base_mes?: number | null
+          id?: string
+          municipios?: string[]
+          nome?: string
+          origem?: string
+          tipo?: Database["public"]["Enums"]["dp_sindicato_tipo"]
+          uf?: string | null
+          updated_at?: string
+        }
+        Relationships: []
       }
       dp_solicitacoes: {
         Row: {
@@ -13639,6 +13860,7 @@ export type Database = {
           data_fim: string | null
           devolvido_em: string | null
           devolvido_motivo: string | null
+          excede_limite_dia: boolean
           fora_da_janela: boolean
           id: string
           motivo: string | null
@@ -13669,6 +13891,7 @@ export type Database = {
           data_fim?: string | null
           devolvido_em?: string | null
           devolvido_motivo?: string | null
+          excede_limite_dia?: boolean
           fora_da_janela?: boolean
           id?: string
           motivo?: string | null
@@ -13699,6 +13922,7 @@ export type Database = {
           data_fim?: string | null
           devolvido_em?: string | null
           devolvido_motivo?: string | null
+          excede_limite_dia?: boolean
           fora_da_janela?: boolean
           id?: string
           motivo?: string | null
@@ -13741,6 +13965,8 @@ export type Database = {
       }
       dp_trocas: {
         Row: {
+          assinatura_dispensa_motivo: string | null
+          assinatura_dispensada_em: string | null
           cancelamento_motivo: string | null
           cancelamento_solicitado_em: string | null
           cancelamento_solicitado_por: string | null
@@ -13762,6 +13988,7 @@ export type Database = {
           motivo: string
           notificar_portal: boolean
           origem_registro: string
+          riscos_12x36: Json
           solicitante_assinado_em: string | null
           solicitante_assinatura: string | null
           solicitante_id: string
@@ -13769,6 +13996,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          assinatura_dispensa_motivo?: string | null
+          assinatura_dispensada_em?: string | null
           cancelamento_motivo?: string | null
           cancelamento_solicitado_em?: string | null
           cancelamento_solicitado_por?: string | null
@@ -13790,6 +14019,7 @@ export type Database = {
           motivo: string
           notificar_portal?: boolean
           origem_registro?: string
+          riscos_12x36?: Json
           solicitante_assinado_em?: string | null
           solicitante_assinatura?: string | null
           solicitante_id: string
@@ -13797,6 +14027,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          assinatura_dispensa_motivo?: string | null
+          assinatura_dispensada_em?: string | null
           cancelamento_motivo?: string | null
           cancelamento_solicitado_em?: string | null
           cancelamento_solicitado_por?: string | null
@@ -13818,6 +14050,7 @@ export type Database = {
           motivo?: string
           notificar_portal?: boolean
           origem_registro?: string
+          riscos_12x36?: Json
           solicitante_assinado_em?: string | null
           solicitante_assinatura?: string | null
           solicitante_id?: string
@@ -13990,6 +14223,57 @@ export type Database = {
           },
           {
             foreignKeyName: "dp_unidade_cargos_unidade_id_fkey"
+            columns: ["unidade_id"]
+            isOneToOne: false
+            referencedRelation: "dp_unidades"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      dp_unidade_feriado_operacao: {
+        Row: {
+          atualizado_por: string | null
+          company_id: string
+          data: string
+          escala_confirmada_em: string | null
+          escala_confirmada_por: string | null
+          fechada: boolean
+          id: string
+          unidade_id: string
+          updated_at: string
+        }
+        Insert: {
+          atualizado_por?: string | null
+          company_id: string
+          data: string
+          escala_confirmada_em?: string | null
+          escala_confirmada_por?: string | null
+          fechada?: boolean
+          id?: string
+          unidade_id: string
+          updated_at?: string
+        }
+        Update: {
+          atualizado_por?: string | null
+          company_id?: string
+          data?: string
+          escala_confirmada_em?: string | null
+          escala_confirmada_por?: string | null
+          fechada?: boolean
+          id?: string
+          unidade_id?: string
+          updated_at?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dp_unidade_feriado_operacao_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dp_unidade_feriado_operacao_unidade_id_fkey"
             columns: ["unidade_id"]
             isOneToOne: false
             referencedRelation: "dp_unidades"
@@ -14188,6 +14472,8 @@ export type Database = {
       }
       dp_unidades: {
         Row: {
+          adiantamento_antecedencia_dias: number
+          adiantamento_aviso: string
           ativo: boolean
           bairro: string | null
           banco_horas: boolean
@@ -14200,6 +14486,7 @@ export type Database = {
           compensacao_sindical_ciencia_em: string | null
           compensacao_sindical_ciencia_por: string | null
           complemento: string | null
+          convoca_feriados_automatico: boolean
           created_at: string
           dia_adiantamento: number | null
           endereco: string | null
@@ -14209,6 +14496,8 @@ export type Database = {
           logradouro: string | null
           nome: string
           numero: string | null
+          pagamento_salario_dia: number | null
+          pagamento_salario_tipo: string | null
           possui_relogio_ponto: boolean
           relogio_ponto_dispensa_em: string | null
           relogio_ponto_dispensa_justificativa: string | null
@@ -14220,6 +14509,8 @@ export type Database = {
           updated_at: string
         }
         Insert: {
+          adiantamento_antecedencia_dias?: number
+          adiantamento_aviso?: string
           ativo?: boolean
           bairro?: string | null
           banco_horas?: boolean
@@ -14232,6 +14523,7 @@ export type Database = {
           compensacao_sindical_ciencia_em?: string | null
           compensacao_sindical_ciencia_por?: string | null
           complemento?: string | null
+          convoca_feriados_automatico?: boolean
           created_at?: string
           dia_adiantamento?: number | null
           endereco?: string | null
@@ -14241,6 +14533,8 @@ export type Database = {
           logradouro?: string | null
           nome: string
           numero?: string | null
+          pagamento_salario_dia?: number | null
+          pagamento_salario_tipo?: string | null
           possui_relogio_ponto?: boolean
           relogio_ponto_dispensa_em?: string | null
           relogio_ponto_dispensa_justificativa?: string | null
@@ -14252,6 +14546,8 @@ export type Database = {
           updated_at?: string
         }
         Update: {
+          adiantamento_antecedencia_dias?: number
+          adiantamento_aviso?: string
           ativo?: boolean
           bairro?: string | null
           banco_horas?: boolean
@@ -14264,6 +14560,7 @@ export type Database = {
           compensacao_sindical_ciencia_em?: string | null
           compensacao_sindical_ciencia_por?: string | null
           complemento?: string | null
+          convoca_feriados_automatico?: boolean
           created_at?: string
           dia_adiantamento?: number | null
           endereco?: string | null
@@ -14273,6 +14570,8 @@ export type Database = {
           logradouro?: string | null
           nome?: string
           numero?: string | null
+          pagamento_salario_dia?: number | null
+          pagamento_salario_tipo?: string | null
           possui_relogio_ponto?: boolean
           relogio_ponto_dispensa_em?: string | null
           relogio_ponto_dispensa_justificativa?: string | null
@@ -18185,6 +18484,18 @@ export type Database = {
         Args: { _subscription_id: string }
         Returns: boolean
       }
+      _billing_v2_colaboradores_ativos: {
+        Args: { _billing_account_id: string; _company_id?: string }
+        Returns: number
+      }
+      _billing_v2_enterprise_bloqueio: {
+        Args: {
+          _billing_account_id: string
+          _company_id: string
+          _plan_id: string
+        }
+        Returns: string
+      }
       _billing_v2_limits: {
         Args: { _sub: string }
         Returns: {
@@ -18270,6 +18581,7 @@ export type Database = {
         }
         Returns: string
       }
+      admin_assinaturas_lista: { Args: { p_escopo?: string }; Returns: Json }
       admin_backoffice_candidatos: {
         Args: { _busca?: string }
         Returns: {
@@ -18302,6 +18614,85 @@ export type Database = {
       admin_cliente360_marcar_interna: {
         Args: { _account: string; _interna: boolean; _motivo: string }
         Returns: undefined
+      }
+      admin_concierge_assumir_empresa: {
+        Args: { p_company_id: string }
+        Returns: Json
+      }
+      admin_concierge_buscar_empresa: {
+        Args: { p_busca: string }
+        Returns: {
+          cnpj: string
+          colaboradores: number
+          company_id: string
+          dono_nome: string
+          em_apoio: boolean
+          empresa: string
+          unidades: number
+        }[]
+      }
+      admin_concierge_concluir_parametrizacao:
+        | { Args: { p_company_id: string }; Returns: Json }
+        | {
+            Args: { p_company_id: string; p_modo_trial: string }
+            Returns: Json
+          }
+      admin_concierge_lista: {
+        Args: never
+        Returns: {
+          ativado_em: string
+          cnpj: string
+          colaboradores: number
+          company_id: string
+          conta_existente: boolean
+          convite_expira_em: string
+          convite_status: string
+          criado_em: string
+          email_enviado_em: string
+          empresa: string
+          fichas: number
+          gestor_email: string
+          gestor_nome: string
+          gestor_whatsapp: string
+          link_aberto_em: string
+          modo: string
+          modulos: string[]
+          parametrizacao_concluida_em: string
+          token: string
+          unidades: number
+          whatsapp_enviado_em: string
+        }[]
+      }
+      admin_concierge_previa_entrega: {
+        Args: { p_company_id: string; p_modo_trial?: string }
+        Returns: Json
+      }
+      admin_concierge_renovar_convite: {
+        Args: { p_company_id: string }
+        Returns: Json
+      }
+      admin_faturas_lista: { Args: { p_escopo?: string }; Returns: Json }
+      admin_provisionar_empresa_concierge: {
+        Args: {
+          p_bairro: string
+          p_cep: string
+          p_cidade: string
+          p_cnpj: string
+          p_complemento: string
+          p_criar_unidade?: boolean
+          p_email_empresa: string
+          p_gestor_email: string
+          p_gestor_nome: string
+          p_gestor_whatsapp: string
+          p_logradouro: string
+          p_modulos: string[]
+          p_nome_fantasia: string
+          p_numero: string
+          p_razao_social: string
+          p_telefone_empresa: string
+          p_uf: string
+        }
+        Returns: Json
       }
       app_error_log_record: {
         Args: {
@@ -18505,6 +18896,10 @@ export type Database = {
       billing_v2_ensure_company_account: {
         Args: { _company_id: string }
         Returns: string
+      }
+      billing_v2_enterprise_elegibilidade: {
+        Args: { _company_id: string }
+        Returns: Json
       }
       billing_v2_exempt: {
         Args: {
@@ -18850,6 +19245,14 @@ export type Database = {
           subscription_id: string
         }[]
       }
+      concierge_ativar: {
+        Args: { p_grupo_id: string; p_user_id: string }
+        Returns: undefined
+      }
+      concierge_prazo: {
+        Args: { p_agora: string; p_fim: string; p_modo: string }
+        Returns: string
+      }
       consume_recovery_reset: {
         Args: { p_challenge_id: string; p_reset_token_hash: string }
         Returns: string
@@ -18933,9 +19336,41 @@ export type Database = {
           p_colaborador: string
           p_data: string
           p_observacao?: string
+          p_termo_documento_id?: string
+          p_termo_modo?: string
           p_tipo: string
         }
         Returns: Json
+      }
+      dp_adiantamento_relacao: {
+        Args: { p_company: string; p_competencia: string; p_unidade?: string }
+        Returns: {
+          cargo: string
+          colaborador_id: string
+          dia_adiantamento: number
+          mudanca_data: string
+          mudanca_origem: string
+          nome: string
+          pagamento_em: string
+          regime: string
+          situacao: string
+          termo_documento_id: string
+          termo_situacao: string
+          unidade_id: string
+          unidade_nome: string
+        }[]
+      }
+      dp_adiantamento_solicitar_portal: {
+        Args: { p_documento?: string; p_tipo: string }
+        Returns: Json
+      }
+      dp_adiantamento_termo_descartar: {
+        Args: { p_documento: string }
+        Returns: boolean
+      }
+      dp_adiantamento_termo_preparar: {
+        Args: { p_file_path: string; p_file_size?: number }
+        Returns: string
       }
       dp_adicional_tempo_servico_salvar: {
         Args: { p_company_id: string; p_dados: Json; p_id?: string }
@@ -19237,6 +19672,10 @@ export type Database = {
         }
         Returns: string
       }
+      dp_colaborador_assinatura_of: {
+        Args: { _user_id: string }
+        Returns: string
+      }
       dp_colaborador_ativo_of: { Args: { _user_id: string }; Returns: string }
       dp_colaborador_beneficio_definir: {
         Args: { p_dados: Json; p_id?: string }
@@ -19297,6 +19736,25 @@ export type Database = {
           _vira?: boolean
         }
         Returns: boolean
+      }
+      dp_colaborador_modo_assinatura_definir: {
+        Args: {
+          p_colaborador_id: string
+          p_converter_pendentes?: boolean
+          p_modo: string
+          p_motivo?: string
+          p_origem?: string
+          p_vigente_desde: string
+        }
+        Returns: Json
+      }
+      dp_colaborador_modo_assinatura_em: {
+        Args: { p_colaborador_id: string; p_data: string }
+        Returns: string
+      }
+      dp_colaborador_modo_assinatura_pendentes: {
+        Args: { p_colaborador_id: string }
+        Returns: number
       }
       dp_colaborador_of: { Args: { _user_id: string }; Returns: string }
       dp_colaborador_perfil_atualizar: {
@@ -19435,6 +19893,7 @@ export type Database = {
           folga_janela_abre_dia: number
           folga_janela_ativa: boolean
           folga_janela_fecha_dia: number
+          folga_marcacao_portal: boolean
           folgas_fds_por_mes: number
           id: string
           modo_domingo: string
@@ -19911,6 +20370,10 @@ export type Database = {
         }[]
       }
       dp_cpf_valido: { Args: { p: string }; Returns: boolean }
+      dp_criar_unidade_inicial: {
+        Args: { p_company_id: string }
+        Returns: string
+      }
       dp_data_bloqueada_excluir: { Args: { p_id: string }; Returns: undefined }
       dp_data_bloqueada_rebloquear: {
         Args: { p_id: string }
@@ -20117,6 +20580,10 @@ export type Database = {
         Args: { _company_id: string }
         Returns: number
       }
+      dp_documento_restaurar: {
+        Args: { p_documento_id: string }
+        Returns: Json
+      }
       dp_documento_revisar: {
         Args: { p_documento_id: string; p_motivo?: string; p_status: string }
         Returns: boolean
@@ -20133,6 +20600,27 @@ export type Database = {
       dp_documento_versao_publicar: {
         Args: { _anterior_id?: string; _motivo?: string; _novo_id: string }
         Returns: boolean
+      }
+      dp_documentos_lixeira: {
+        Args: { p_company_id: string }
+        Returns: {
+          arquivado_em: string
+          arquivado_por: string
+          arquivado_por_nome: string
+          arquivamento_motivo: string
+          colaborador_id: string
+          colaborador_nome: string
+          file_name: string
+          file_path: string
+          id: string
+          mime_type: string
+          referencia_data: string
+          restaurar_ate: string
+          tipo: string
+          titulo: string
+          unidade_id: string
+          unidade_nome: string
+        }[]
       }
       dp_dsr_ciencia_registrar: {
         Args: {
@@ -20197,6 +20685,10 @@ export type Database = {
         Returns: undefined
       }
       dp_expirar_trocas: { Args: never; Returns: number }
+      dp_feriado_da_unidade_colab: {
+        Args: { _colab: string; _data: string }
+        Returns: string
+      }
       dp_feriado_movel_data: {
         Args: { _ano: number; _codigo: string }
         Returns: string
@@ -20492,6 +20984,42 @@ export type Database = {
         Returns: Json
       }
       dp_ficha_ignorar: { Args: { p_item_id: string }; Returns: Json }
+      dp_ficha_lote_ajustar: {
+        Args: { p_importacao_id: string; p_itens?: Json; p_padroes?: Json }
+        Returns: Json
+      }
+      dp_ficha_lote_notificar: {
+        Args: { p_importacao_id: string; p_user_id: string }
+        Returns: Json
+      }
+      dp_ficha_lote_organizar: {
+        Args: {
+          p_grupos: Json
+          p_importacao_id: string
+          p_sindicato_laboral_id?: string
+          p_unidade_id: string
+        }
+        Returns: Json
+      }
+      dp_ficha_lote_registrar_canais: {
+        Args: {
+          p_canais: Json
+          p_importacao_id: string
+          p_notificacao_id: string
+        }
+        Returns: undefined
+      }
+      dp_ficha_lote_responsaveis: {
+        Args: { p_importacao_id: string }
+        Returns: {
+          email: string
+          nome: string
+          perfil: string
+          user_id: string
+          whatsapp: string
+        }[]
+      }
+      dp_ficha_reativar: { Args: { p_item_id: string }; Returns: Json }
       dp_folga_admin_cancelar: {
         Args: {
           p_colaborador: string
@@ -20713,6 +21241,10 @@ export type Database = {
       }
       dp_folga_solicitar: {
         Args: { p_data: string; p_fora_da_janela?: boolean; p_motivo?: string }
+        Returns: Json
+      }
+      dp_folga_solicitar_mes_lotado: {
+        Args: { p_data: string; p_motivo?: string }
         Returns: Json
       }
       dp_folga_substituir_pedido: {
@@ -21192,9 +21724,11 @@ export type Database = {
           id: string
           nome: string
           nome_social: string
+          plantao_12x36: string
           unidade_id: string
         }[]
       }
+      dp_portal_meu_adiantamento: { Args: never; Returns: Json }
       dp_portal_meus_contatos: { Args: never; Returns: Json }
       dp_portal_meus_disciplinares: {
         Args: never
@@ -21206,6 +21740,17 @@ export type Database = {
           tipo: string
           via_assinada_em: string
           via_assinada_path: string
+        }[]
+      }
+      dp_portal_meus_pagamentos: {
+        Args: { _competencia: string }
+        Returns: {
+          adiantamento_dia: number
+          salario_dia: number
+          salario_rotulo: string
+          salario_tipo: string
+          unidade_id: string
+          va_dia: number
         }[]
       }
       dp_portal_minha_regra_compensacao: {
@@ -21687,6 +22232,10 @@ export type Database = {
           unidade_id: string
         }[]
       }
+      dp_sindicato_adotar: {
+        Args: { p_catalogo_id: string; p_company_id: string }
+        Returns: string
+      }
       dp_sindicato_conflitos: {
         Args: {
           _cargo_id: string
@@ -21698,6 +22247,10 @@ export type Database = {
           sindicato_id: string
           sindicato_nome: string
         }[]
+      }
+      dp_sindicato_vincular_cargos_sem_laboral: {
+        Args: { p_sindicato_id: string }
+        Returns: number
       }
       dp_solicitacao_anexar_gestor: {
         Args: { p_arquivo_path: string; p_id: string }
@@ -21982,6 +22535,31 @@ export type Database = {
         }
         Returns: Json
       }
+      fn_cadastrar_empresa_onboarding_com_unidade: {
+        Args: {
+          p_bairro: string
+          p_cep: string
+          p_cidade: string
+          p_cnpj: string
+          p_complemento: string
+          p_criar_unidade?: boolean
+          p_email_cliente: string
+          p_email_empresa: string
+          p_logradouro: string
+          p_modulos_slugs: string[]
+          p_nome_completo: string
+          p_nome_fantasia: string
+          p_numero: string
+          p_razao_social: string
+          p_segmento_id: string
+          p_telefone_cliente: string
+          p_telefone_empresa: string
+          p_uf: string
+          p_whatsapp_cliente: string
+          p_whatsapp_empresa: string
+        }
+        Returns: Json
+      }
       fn_mfa_nudge_estado: {
         Args: never
         Returns: {
@@ -21991,6 +22569,10 @@ export type Database = {
       }
       fn_mfa_nudge_registrar: {
         Args: { _opt_out?: boolean }
+        Returns: undefined
+      }
+      fn_onboarding_sincronizar_trial: {
+        Args: { p_company_id: string; p_modulos: string[]; p_uid: string }
         Returns: undefined
       }
       get_accessible_accounts: {
@@ -23007,6 +23589,10 @@ export type Database = {
         | "folga_pendentes_gestor"
         | "ocorrencia_nova"
         | "desligamento_aviso"
+        | "feriado_convocacao"
+        | "ficha_lote_pronto"
+        | "adiantamento_solicitacao"
+        | "adiantamento_relacao"
       dp_ocorrencia_analise_status: "pendente" | "analisada" | "nao_se_aplica"
       dp_ocorrencia_cobertura_execucao:
         | "prevista"
@@ -23495,6 +24081,10 @@ export const Constants = {
         "folga_pendentes_gestor",
         "ocorrencia_nova",
         "desligamento_aviso",
+        "feriado_convocacao",
+        "ficha_lote_pronto",
+        "adiantamento_solicitacao",
+        "adiantamento_relacao",
       ],
       dp_ocorrencia_analise_status: ["pendente", "analisada", "nao_se_aplica"],
       dp_ocorrencia_cobertura_execucao: [

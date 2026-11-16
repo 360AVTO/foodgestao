@@ -1,0 +1,100 @@
+import { describe, expect, it } from "vitest";
+import { avaliarFranquia, comparativoEnterprise, type PreviaFranquia } from "./franquia";
+
+// Multiempresa: R$ 189,90 até 18; adicional R$ 19,90; Enterprise R$ 10,00 a partir de 19.
+const multiCheio = (extra: Partial<PreviaFranquia> = {}): PreviaFranquia => ({
+  modo: "v2",
+  pode_gerir: true,
+  atual: 18,
+  limite: 18,
+  isento: false,
+  valor_unit_cents: 1990,
+  plano: "pessoas-multiempresa",
+  sugestao_upgrade: {
+    plano: "pessoas-enterprise",
+    nome: "Pessoas 360° Enterprise",
+    unitario_cents: 1000,
+    minimo: 19,
+    valor_atual_cents: 18990 + 1990,
+    valor_enterprise_cents: 19000,
+  },
+  ...extra,
+});
+
+describe("franquia de colaboradores", () => {
+  it("19º colaborador no Multiempresa: avisa e mostra Enterprise R$ 190,00 contra R$ 209,80", () => {
+    const e = avaliarFranquia(multiCheio(), 1);
+    expect(e.tipo).toBe("excedente");
+    if (e.tipo !== "excedente") return;
+    expect(e.enterprise?.valorAtualCents).toBe(20980);
+    expect(e.enterprise?.valorEnterpriseCents).toBe(19000);
+    expect(e.enterprise?.compensa).toBe(true);
+  });
+
+  it("lote de 3 fichas com 17 ativos: só 2 passam da franquia de 18", () => {
+    const e = avaliarFranquia(multiCheio({ atual: 17, sugestao_upgrade: null }), 3);
+    expect(e.tipo === "excedente" && e.excedentes).toBe(2);
+  });
+
+  it("usuário sem ser dono/admin fica bloqueado antes de preencher", () => {
+    const e = avaliarFranquia(multiCheio({ pode_gerir: false }), 1);
+    expect(e.tipo === "bloqueado" && e.motivo).toBe("sem_permissao");
+  });
+
+  it("Enterprise não trava: cada colaborador ativo soma R$ 10,00", () => {
+    const e = avaliarFranquia({ ...multiCheio(), limite: -1, atual: 44, por_colaborador_cents: 1000, sugestao_upgrade: null }, 1);
+    expect(e).toEqual({ tipo: "por_colaborador", unitarioCents: 1000, atual: 44 });
+  });
+
+  it("com vaga na franquia informa quantas restam", () => {
+    expect(avaliarFranquia(multiCheio({ atual: 15 }), 1)).toEqual({ tipo: "livre", vagas: 3 });
+  });
+
+  it("teste grátis no Enterprise: sem custo extra agora, R$ 10,00 por colaborador e mínimo 19 depois", () => {
+    const e = avaliarFranquia({
+      ...multiCheio(), limite: -1, atual: 0, por_colaborador_cents: 1000, minimo_colaboradores: 19,
+      em_teste: true, teste_termina_em: "2026-11-19T16:30:20Z", plano_nome: "Pessoas 360° Enterprise", sugestao_upgrade: null,
+    }, 47);
+    expect(e).toEqual({
+      tipo: "teste", unitarioCents: 1000, minimo: 19, atual: 0,
+      planoNome: "Pessoas 360° Enterprise", terminaEm: "2026-11-19T16:30:20Z",
+    });
+  });
+
+  it("teste grátis no Gestão (8) com 8 ativos: o 9º entra sem franquia nem custo extra", () => {
+    const e = avaliarFranquia(multiCheio({
+      atual: 8, limite: 8, plano: "pessoas-gestao", em_teste: true, teste_termina_em: "2026-11-19T16:30:20Z",
+    }), 1);
+    expect(e.tipo).toBe("teste");
+    expect(e.tipo === "teste" && e.unitarioCents).toBeNull();
+  });
+
+  it("teste grátis com lote de 47 fichas no Gestão: nenhum excedente a confirmar", () => {
+    const e = avaliarFranquia(multiCheio({ atual: 0, limite: 8, em_teste: true }), 47);
+    expect(e.tipo).toBe("teste");
+  });
+
+  it("teste grátis sem poder de gestão não bloqueia o cadastro", () => {
+    const e = avaliarFranquia(multiCheio({ pode_gerir: false, em_teste: true }), 1);
+    expect(e.tipo).toBe("teste");
+  });
+
+  it("depois do teste, a franquia volta a valer", () => {
+    const e = avaliarFranquia(multiCheio({ em_teste: false }), 1);
+    expect(e.tipo).toBe("excedente");
+  });
+
+  it("Gestão cheio (8) com o 9º colaborador: não oferece o Enterprise (abaixo de 19)", () => {
+    const gestao = multiCheio({ atual: 8, limite: 8, plano: "pessoas-gestao" });
+    expect(comparativoEnterprise(gestao, 1)).toBeNull();
+    const e = avaliarFranquia(gestao, 1);
+    expect(e.tipo === "excedente" ? e.enterprise : "outro").toBeNull();
+  });
+
+  it("lote que leva a equipe a 19 ou mais oferece o Enterprise", () => {
+    const gestao = multiCheio({ atual: 8, limite: 8, plano: "pessoas-gestao" });
+    expect(comparativoEnterprise(gestao, 10)).toBeNull();
+    expect(comparativoEnterprise(gestao, 11)?.valorEnterpriseCents).toBe(19000);
+  });
+});
+

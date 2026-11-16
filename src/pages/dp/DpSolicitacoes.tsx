@@ -1,3 +1,5 @@
+import { mensagemPedidoDiaLotado } from "@/lib/dp/folga-dia-lotado";
+import { datasSolicitacao, ehTrocaFolga } from "@/lib/dp/solicitacao-datas";
 import { TIPOS_LICENCA_CURTA, TIPO_AFASTAMENTO_LABEL } from "@/lib/dp/licencas";
 import { abrirNoApp } from "@/lib/visualizadorGlobal";
 import { diasDeAntecedencia, ehCompensacaoFeriado, motivoLegivel, MOTIVO_COMPENSACAO_FERIADO } from "@/lib/dp/termos-compensacao";
@@ -34,6 +36,9 @@ import { RaioXOperacaoDia } from "@/components/dp/RaioXOperacaoDia";
 import { LiberacaoDesfazerDialog, ehLiberacaoGestor } from "@/components/dp/LiberacaoDesfazerDialog";
 import { AtestadoAnexoDialog, type AtestadoAnexoAlvo } from "@/components/dp/AtestadoAnexoDialog";
 import { RecusaDialog } from "@/components/dp/RecusaDialog";
+import { ehPedidoDispensaFeriado, validarRecusaDispensa } from "@/lib/dp/dispensa-feriado";
+import { useNavigate } from "react-router-dom";
+import { UserPlus } from "lucide-react";
 import { Paperclip, Undo2 } from "lucide-react";
 
 const ehAtestadoLike = (r: { tipo: string }) => r.tipo === "atestado" || String(r.tipo).startsWith("licenca");
@@ -233,8 +238,10 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
   const [desfazer, setDesfazer] = useState<{ id: string; nome?: string | null } | null>(null);
   const [aprovarAtestado, setAprovarAtestado] = useState<{ id: string; colaborador_id: string; nome?: string | null; resposta: string; evento: "atestado" | "licenca" } | null>(null);
 
+  const navigate = useNavigate();
+  const [extraAlvo, setExtraAlvo] = useState<{ colaboradorId: string; nome?: string; data: string; unidadeId?: string | null } | null>(null);
   const respond = useMutation({
-    mutationFn: async ({ id, status, resposta }: { id: string; status: Status; resposta?: string }) => {
+    mutationFn: async ({ id, status, resposta }: { id: string; status: Status; resposta?: string; extra?: { colaboradorId: string; nome?: string; data: string; unidadeId?: string | null } }) => {
       const { error } = await supabase.rpc("dp_solicitacao_responder", {
         p_id: id,
         p_status: status as "aprovada" | "recusada",
@@ -254,8 +261,9 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
         return n;
       });
       setConfirmAdiantamento(null);
+      if (vars.status === "aprovada" && vars.extra) setExtraAlvo(vars.extra);
     },
-    onError: (e) => toast.error("Erro", { description: e instanceof Error ? e.message : String(e) }),
+    onError: (e) => toast.error("Erro", { description: mensagemPedidoDiaLotado(e instanceof Error ? e.message : String(e)) ?? (e instanceof Error ? e.message : String(e)) }),
   });
 
   const [anexar, setAnexar] = useState<AtestadoAnexoAlvo | null>(null);
@@ -305,6 +313,17 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
       setConfirmAdiantamento(r);
       return;
     }
+    if (ehPedidoDispensaFeriado(r.motivo)) {
+      if (!approve) {
+        try { validarRecusaDispensa(respostas[r.id] ?? ""); }
+        catch (e) { toast.error("Motivo obrigatório", { description: "Escreva no campo de resposta por que a dispensa foi recusada. O colaborador continua convocado." }); return; }
+      }
+      respond.mutate({
+        id: r.id, status: approve ? "aprovada" : "recusada", resposta,
+        extra: approve && r.data_alvo ? { colaboradorId: r.colaborador_id, nome: r.dp_colaboradores?.nome, data: r.data_alvo, unidadeId: colabs.data?.find((c) => c.id === r.colaborador_id)?.unidade_id ?? null } : undefined,
+      });
+      return;
+    }
     respond.mutate({ id: r.id, status: approve ? "aprovada" : "recusada", resposta });
   };
 
@@ -351,18 +370,19 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="font-medium truncate">{s.dp_colaboradores?.nome ?? "Funcionário"}</div>
-                    <div className="text-sm text-muted-foreground truncate">
+                    <div className="text-sm text-muted-foreground break-words">
                       {s.tipo === "folga" && s.data_fim ? (
                         <>
                           <span className="mr-2">Troca de folga</span>
                           <b>
-                            folga em {formatBR(s.data_alvo)} · trabalha em {formatBR(s.data_fim)}
+                            <span className="block">Folga atual: {formatBR(s.data_fim)} · passará a trabalhar</span>
+                            <span className="block">Folga desejada: {formatBR(s.data_alvo)}</span>
                           </b>
                         </>
                       ) : (
                         <>
                           <span className="capitalize mr-2">
-                            {s.tipo === "folga" && ehCompensacaoFeriado(s.motivo) ? "Compensação de Feriado" : s.tipo === "folga" && s.fora_da_janela ? "Folga extra (exceção)" : s.tipo}
+                            {ehPedidoDispensaFeriado(s.motivo) ? "Dispensa de Feriado (a pedido)" : s.tipo === "folga" && ehCompensacaoFeriado(s.motivo) ? "Compensação de Feriado" : s.tipo === "folga" && s.excede_limite_dia ? "Folga do mês (dia lotado)" : s.tipo === "folga" && s.fora_da_janela ? "Folga extra (exceção)" : s.tipo}
                           </span>
                           <b>{formatBR(s.data_alvo)}{s.data_fim ? ` → ${formatBR(s.data_fim)}` : ""}</b>
                         </>
@@ -387,13 +407,24 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
                     Compensação de feriado trabalhado: folga devida ao colaborador por ter trabalhado no feriado.
                   </div>
                 )}
+                {s.tipo === "folga" && s.excede_limite_dia && (
+                  <div className="rounded-lg border border-warning/40 bg-warning/10 p-2 text-xs text-foreground">
+                    Folga de fim de semana do mês: o colaborador ainda não tem a deste mês e o dia já está no limite de
+                    pessoas de folga. Se aprovar, a folga entra acima do limite; se recusar, combine outro dia.
+                  </div>
+                )}
                 {s.tipo === "folga" && !s.data_fim && s.fora_da_janela && !ehCompensacaoFeriado(s.motivo) && (
                   <div className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
                     Folga adicional: não conta como folga de fim de semana nem substitui a folga semanal fixa.
                   </div>
                 )}
 
-                {(s.tipo === "folga" || ehAtestadoLike(s)) && s.data_alvo && s.status === "pendente" && (
+                {ehPedidoDispensaFeriado(s.motivo) && (
+                  <div className="rounded-lg border border-border bg-muted/40 p-2 text-xs text-muted-foreground">
+                    Termo assinado: o colaborador segue convocado até sua aprovação. Se aprovar, o dia vira descanso sem desconto, sem dobra e sem folga compensatória. Para recusar, escreva o motivo.
+                  </div>
+                )}
+                {(s.tipo === "folga" || ehAtestadoLike(s) || ehPedidoDispensaFeriado(s.motivo)) && s.data_alvo && s.status === "pendente" && (
                   <RaioXOperacaoDia companyId={s.company_id} colaboradorId={s.colaborador_id} data={s.data_alvo} />
                 )}
 
@@ -562,9 +593,10 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
                 <div className="min-w-0 flex-1">
                   <div className="font-bold">
                     {formatBR(dataRef(s))}
-                    <span className="ml-2 text-xs font-medium text-muted-foreground">{s.tipo === "folga" && s.data_fim ? "Troca de folga" : s.tipo === "folga" && ehCompensacaoFeriado(s.motivo) ? "Compensação de Feriado" : s.tipo === "folga" && s.fora_da_janela ? "Folga extra (exceção)" : tipoLabel(s.tipo)}</span>
+                    <span className="ml-2 text-xs font-medium text-muted-foreground">{s.tipo === "folga" && s.data_fim ? "Troca de folga" : s.tipo === "folga" && ehCompensacaoFeriado(s.motivo) ? "Compensação de Feriado" : s.tipo === "folga" && s.excede_limite_dia ? "Folga do mês (dia lotado)" : s.tipo === "folga" && s.fora_da_janela ? "Folga extra (exceção)" : tipoLabel(s.tipo)}</span>
                   </div>
                   <div className="truncate text-muted-foreground">{s.dp_colaboradores?.nome ?? "—"}</div>
+                  {ehTrocaFolga(s) && <div className="mt-1 text-xs text-muted-foreground">Folga atual: {formatBR(s.data_fim)}<br />Folga desejada: {formatBR(s.data_alvo)}</div>}
                   {motivoLegivel(s.motivo) && <div className="text-muted-foreground mt-0.5 line-clamp-1 md:line-clamp-none">{motivoLegivel(s.motivo)}</div>}
                   {s.resposta_admin && (
                     <div className="text-xs text-muted-foreground mt-1 line-clamp-1 md:line-clamp-none">
@@ -606,13 +638,13 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
                 </SelectContent>
               </Select>
             </div>}
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid gap-3 sm:grid-cols-2">
               <div className="grid gap-1.5">
-                <Label>Data alvo</Label>
+                <Label>{(tipoFixo ?? form.tipo) === "folga" ? "Folga desejada" : "Data inicial"}</Label>
                 <Input type="date" value={form.data_alvo} onChange={(e) => setForm({ ...form, data_alvo: e.target.value })} />
               </div>
               <div className="grid gap-1.5">
-                <Label>Data fim (opcional)</Label>
+                <Label>{(tipoFixo ?? form.tipo) === "folga" ? "Folga atual (se troca)" : "Data final (opcional)"}</Label>
                 <Input type="date" value={form.data_fim} onChange={(e) => setForm({ ...form, data_fim: e.target.value })} />
               </div>
             </div>
@@ -709,9 +741,8 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
         title={detailsRow?.dp_colaboradores?.nome ?? "Solicitação"}
         description={detailsRow ? STATUS_META[detailsRow.status].label : undefined}
         meta={detailsRow ? [
-          { label: "Tipo", value: <span className="capitalize">{detailsRow.tipo === "folga" && detailsRow.data_fim ? "Troca de folga" : detailsRow.tipo === "folga" && ehCompensacaoFeriado(detailsRow.motivo) ? "Compensação de Feriado" : detailsRow.tipo === "folga" && detailsRow.fora_da_janela ? "Folga extra (exceção)" : detailsRow.tipo}</span> },
-          { label: "Data alvo", value: formatBR(detailsRow.data_alvo) },
-          ...(detailsRow.data_fim ? [{ label: "Data fim", value: formatBR(detailsRow.data_fim) }] : []),
+          { label: "Tipo", value: <span className="capitalize">{detailsRow.tipo === "folga" && detailsRow.data_fim ? "Troca de folga" : detailsRow.tipo === "folga" && ehCompensacaoFeriado(detailsRow.motivo) ? "Compensação de Feriado" : detailsRow.tipo === "folga" && detailsRow.excede_limite_dia ? "Folga do mês (dia lotado)" : detailsRow.tipo === "folga" && detailsRow.fora_da_janela ? "Folga extra (exceção)" : detailsRow.tipo}</span> },
+          ...datasSolicitacao(detailsRow).map((d) => ({ label: d.label, value: formatBR(d.data) })),
           { label: "Criada em", value: new Date(detailsRow.created_at).toLocaleString("pt-BR") },
           ...(prazoCompensacao(detailsRow) ? [{
             label: "Prazo",
@@ -780,6 +811,27 @@ export default function DpSolicitacoes({ tipoFixo }: { tipoFixo?: Tipo } = {}) {
         loading={devolverMut.isPending}
         onConfirm={(motivo) => devolver && devolverMut.mutate({ id: devolver.id, motivo })}
       />
+      <Dialog open={!!extraAlvo} onOpenChange={(o) => { if (!o) setExtraAlvo(null); }}>
+        <DialogContent>
+          <DialogHeader><DialogTitle>Dispensa aprovada</DialogTitle></DialogHeader>
+          <p className="text-sm text-muted-foreground">
+            {extraAlvo?.nome ?? "O colaborador"} está dispensado do feriado. Se precisar de alguém no lugar, inclua pela Mão de Obra Extra.
+          </p>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" className="h-11" onClick={() => setExtraAlvo(null)}>Agora não</Button>
+            <Button
+              className="h-11"
+              onClick={() => {
+                const a = extraAlvo!;
+                setExtraAlvo(null);
+                navigate(`/dp/escalas/mes?cobrir=${a.colaboradorId}&motivo=outro&data=${a.data}${a.unidadeId ? `&unidade=${a.unidadeId}` : ""}`);
+              }}
+            >
+              <UserPlus className="size-4 mr-2" /> Mão de Obra Extra
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </DpPage>
   );
 }

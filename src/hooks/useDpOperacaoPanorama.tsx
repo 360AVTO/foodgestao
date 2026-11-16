@@ -1,3 +1,4 @@
+import { ehPedidoDispensaFeriado } from "@/lib/dp/dispensa-feriado";
 import { useMemo } from "react";
 import { agruparFeriadosDia, type FeriadoDia } from "@/lib/dp/feriados-apresentacao";
 import type { FeriadoCategoria } from "@/lib/dp/feriados";
@@ -30,9 +31,12 @@ import {
   ehSobDemanda,
   STATUS_GOZO_VISIVEL_OPERACAO,
   ultimoDiaNaEscala,
+  mapaUltimoComparecimento,
+  ultimoComparecimentoDoContrato,
   diaAnterior,
 } from "@/lib/dp/operacao-panorama";
 import { isSocio } from "@/lib/dp/contrato-policy";
+import { STATUS_PROCESSOS_VISIVEIS } from "@/lib/dp/desligamento-apresentacao";
 import { nomeExibicao } from "@/lib/dp/nomeExibicao";
 import type { HorarioFuncionamentoDia } from "@/lib/dp/turno-utils";
 
@@ -457,21 +461,22 @@ export function useDpOperacaoPanorama(competencia: string, unidadeId: string | n
     [base.data, unidadeId],
   );
 
-  // Termination notices in progress: last attendance day (already includes the bank grouping).
+  // Termination processes (running, suspended, under review or effectivated):
+  // last attendance day (already includes the bank grouping). Effectivated
+  // processes keep it so the person never returns to the scale until the legal end.
   const ultimosDias = useQuery({
     queryKey: ["dp_operacao", "desligamento_ultimo_dia", selectedCompanyId],
     enabled: !!selectedCompanyId,
     queryFn: async () => {
       const { data, error } = await supabase.from("dp_desligamento_processos")
-        .select("colaborador_id, ultimo_comparecimento, dispensado_desde")
-        .eq("company_id", selectedCompanyId!).eq("status", "aviso_em_curso");
+        .select("colaborador_id, ultimo_comparecimento, dispensado_desde, created_at")
+        .eq("company_id", selectedCompanyId!)
+        .in("status", STATUS_PROCESSOS_VISIVEIS)
+        .order("created_at", { ascending: false });
       if (error) throw error;
-      const mapa = new Map<string, string>();
-      for (const p of (data ?? []) as { colaborador_id: string; ultimo_comparecimento: string | null; dispensado_desde: string | null }[]) {
-        const ultimo = p.ultimo_comparecimento ?? (p.dispensado_desde ? diaAnterior(p.dispensado_desde) : null);
-        if (ultimo) mapa.set(p.colaborador_id, ultimo);
-      }
-      return mapa;
+      return mapaUltimoComparecimento(
+        (data ?? []) as { colaborador_id: string; ultimo_comparecimento: string | null; dispensado_desde: string | null }[],
+      );
     },
   });
 
@@ -493,6 +498,8 @@ export function useDpOperacaoPanorama(competencia: string, unidadeId: string | n
               turno_padrao_id: vigente.turno_padrao_id,
               folga_variavel: vigente.folga_variavel,
               folga_fixa_dow: vigente.folga_fixa_dow,
+              escala_modelo: (vigente as { escala_modelo?: string | null }).escala_modelo ?? "semanal",
+              data_primeiro_plantao: (vigente as { data_primeiro_plantao?: string | null }).data_primeiro_plantao ?? null,
               dias: normalizarDias(
                 ((vigente as unknown as { dias?: DiaConfig[] }).dias ?? []).map((x) => ({
                   dow: x.dow,
@@ -524,7 +531,7 @@ export function useDpOperacaoPanorama(competencia: string, unidadeId: string | n
           ativo: c.ativo !== false,
           data_admissao: c.data_admissao,
           // Leaves the store schedule the day after the last attendance (bank included), with no tag.
-          data_desligamento: ultimoDiaNaEscala(c.data_desligamento, ultimosDias.data?.get(c.id)),
+          data_desligamento: ultimoDiaNaEscala(c.data_desligamento, ultimoComparecimentoDoContrato(ultimosDias.data?.get(c.id), c.data_admissao)),
           // Pré-admissão ativada na rotina: freelancer provisório aguardando
           // o registro oficial (selo na operação).
           aguardando_registro:
@@ -561,7 +568,18 @@ export function useDpOperacaoPanorama(competencia: string, unidadeId: string | n
       fim: somarDias(s.data, Math.max(s.suspensao_dias ?? 1, 1) - 1),
       tipo: "suspensao" as const,
     }));
-    return [...deFerias, ...deAtestado, ...deSuspensao];
+    // Dispensa de feriado aprovada: a pessoa sai da operação do dia (faixa de
+    // afastamentos), para a loja não contar com ela no pico.
+    const deDispensa: AusenciaPanorama[] = (d.registradas ?? [])
+      .filter((r) => r.tipo === "outros" && !!r.data_alvo && ehPedidoDispensaFeriado(r.motivo))
+      .map((r) => ({
+        colaborador_id: r.colaborador_id,
+        inicio: r.data_alvo!,
+        fim: r.data_fim ?? r.data_alvo!,
+        tipo: "atestado" as const,
+        subtipo: "Dispensa em Feriado",
+      }));
+    return [...deFerias, ...deAtestado, ...deSuspensao, ...deDispensa];
   }, [base.data]);
 
   /**
@@ -700,6 +718,7 @@ export function useDpOperacaoPanorama(competencia: string, unidadeId: string | n
           folga_id: o.folga_id,
           troca_id: o.troca_id,
           tipo: o.tipo as OcorrenciaPanorama["tipo"],
+          subtipo: o.subtipo ?? null,
           estado: o.estado as OcorrenciaPanorama["estado"],
           minutos: o.minutos ?? null,
           horario_estimado: o.horario_estimado ? o.horario_estimado.slice(0, 5) : null,

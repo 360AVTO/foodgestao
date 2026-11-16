@@ -61,6 +61,25 @@ export function resolverJanela(cfg: JanelaConfig, hoje: Date): JanelaResolvida {
   return { estado, abreEm, fechaEm, competencia, competenciaKey: mesKey(competencia) };
 }
 
+/** Situação do colaborador no mês em curso (para não ficar sem folga). */
+export interface DireitoMesCorrente {
+  /** Data de referência ("hoje" do servidor). */
+  hoje: Date;
+  /** Ainda não tem a folga de fim de semana do mês em curso. */
+  semFolgaFdsNoMes: boolean;
+}
+
+/**
+ * Quem ainda está sem a folga de fim de semana do mês em curso pode marcá-la
+ * em data futura desse mês, mesmo com a escolha do mês seguinte aberta ou por
+ * abrir — ninguém fica sem folga. O servidor (`dp_folga_marcar`) confere.
+ */
+export function temDireitoMesCorrente(data: Date, direito?: DireitoMesCorrente): boolean {
+  if (!direito?.semFolgaFdsNoMes) return false;
+  const ref = semHoras(direito.hoje);
+  return mesKey(data) === mesKey(ref) && semHoras(data) >= ref;
+}
+
 /**
  * O período é apenas o marco INICIAL da escolha:
  * - antes de abrir, a marcação direta fica bloqueada (só exceção);
@@ -68,11 +87,26 @@ export function resolverJanela(cfg: JanelaConfig, hoje: Date): JanelaResolvida {
  * - depois de encerrado, o colaborador segue marcando e mudando folgas em datas
  *   futuras (troca e exceção continuam disponíveis do mesmo jeito).
  */
-export function podeMarcarNormal(janela: JanelaResolvida, data: Date): boolean {
+export function podeMarcarNormal(
+  janela: JanelaResolvida,
+  data: Date,
+  direito?: DireitoMesCorrente,
+): boolean {
   if (janela.estado === "inativa") return true;
+  if (temDireitoMesCorrente(data, direito)) return true;
   if (janela.estado === "antes") return false;
   if (janela.estado === "encerrada") return true;
   return mesKey(data) === janela.competenciaKey;
+}
+
+/**
+ * A loja deixa o colaborador marcar, mudar, pedir e trocar folgas pelo portal?
+ * Só `false` explícito do servidor trava (escala definida pela administração);
+ * resposta ausente mantém o comportamento de sempre, e o servidor segue como
+ * defesa final.
+ */
+export function marcacaoPortalLiberada(remota: { marcacao_portal?: boolean | null } | null | undefined): boolean {
+  return remota?.marcacao_portal !== false;
 }
 
 /**

@@ -4,8 +4,12 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { CnpjInput } from "@/components/shared/CnpjInput";
 import { EnderecoFields } from "@/components/shared/EnderecoFields";
 import { SegmentoSelect } from "./SegmentoSelect";
+import { useSegmentos } from "@/hooks/useSegmentos";
+import { segmentoPorCnae } from "@/lib/onboarding/segmentoPorCnae";
 import { maskPhone } from "@/lib/phone";
-import { AlertCircle } from "lucide-react";
+import { useState } from "react";
+import { AlertCircle, Building2, Pencil } from "lucide-react";
+import { Button } from "@/components/ui/button";
 import type { EmpresaFormData } from "@/pages/Onboarding";
 import type { CnpjLookupResult } from "@/hooks/useCnpjLookup";
 
@@ -16,6 +20,8 @@ interface Props {
   setCnpjPending: (v: boolean) => void;
   cnpjInactive: boolean;
   setCnpjInactive: (v: boolean) => void;
+  /** WhatsApp pessoal confirmado no cadastro (só dígitos), para reaproveitar como contato da empresa. */
+  meuWhatsapp?: string;
 }
 
 function maskCep(v: string) {
@@ -23,8 +29,27 @@ function maskCep(v: string) {
   return d.length > 5 ? `${d.slice(0, 5)}-${d.slice(5)}` : d;
 }
 
-export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive, setCnpjInactive }: Props) {
+export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive, setCnpjInactive, meuWhatsapp = "" }: Props) {
+  const usandoMeuWhatsapp = Boolean(meuWhatsapp) && data.whatsappEmpresa.replace(/\D/g, "") === meuWhatsapp;
+  const [preenchidoPelaReceita, setPreenchidoPelaReceita] = useState(false);
+  const [editando, setEditando] = useState(false);
+  const camposResumo: (keyof EmpresaFormData)[] = ["razaoSocial", "nomeFantasia", "cep", "logradouro", "numero", "bairro", "cidade", "uf"];
+  const temErroResumo = camposResumo.some((k) => errors[k]);
+  const completo = Boolean(data.razaoSocial && data.cep && data.logradouro && data.numero && data.bairro && data.cidade && data.uf);
+  const mostrarResumo = preenchidoPelaReceita && completo && !editando && !temErroResumo;
+
+  const { data: segmentos } = useSegmentos();
+  const [segmentoSugerido, setSegmentoSugerido] = useState(false);
+
   const handleCnpjLookup = (d: CnpjLookupResult) => {
+    let segmentoId: string | undefined;
+    if (!data.segmentoId) {
+      const nomeSeg = segmentoPorCnae(d.cnae, `${d.nome_fantasia ?? ""} ${d.razao_social ?? ""}`);
+      segmentoId = nomeSeg ? segmentos?.find((s) => s.nome === nomeSeg)?.id : undefined;
+      setSegmentoSugerido(Boolean(segmentoId));
+    }
+    setPreenchidoPelaReceita(Boolean(d.razao_social));
+    setEditando(false);
     update({
       razaoSocial: d.razao_social ?? data.razaoSocial,
       nomeFantasia: d.nome_fantasia ?? data.nomeFantasia,
@@ -37,6 +62,7 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
       uf: (d.uf ?? data.uf).toUpperCase().slice(0, 2),
       telefoneEmpresa: d.telefone ? maskPhone(d.telefone) : data.telefoneEmpresa,
       emailEmpresa: d.email && !data.emailEmpresa ? d.email : data.emailEmpresa,
+      ...(segmentoId ? { segmentoId } : {}),
     });
     const situ = (d.situacao ?? "").toLowerCase();
     setCnpjInactive(situ.includes("baix") || situ.includes("inap") || situ.includes("suspens"));
@@ -53,7 +79,7 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
 
       {/* Responsável */}
       <fieldset className="space-y-4">
-        <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <legend className="text-xs font-semibold text-muted-foreground">
           Responsável pelo Cadastro
         </legend>
         <Field id="onb-nome" label="Nome Completo" required error={errors.nomeCompleto}>
@@ -73,13 +99,14 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
 
       {/* Empresa */}
       <fieldset className="space-y-4">
-        <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <legend className="text-xs font-semibold text-muted-foreground">
           Empresa
         </legend>
 
         <Field id="onb-cnpj" label="CNPJ" required error={errors.cnpj}>
           <CnpjInput
             id="onb-cnpj"
+            autoLookup
             value={data.cnpj}
             onChange={(v) => update({ cnpj: v })}
             onLookup={handleCnpjLookup}
@@ -99,6 +126,26 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
           </div>
         )}
 
+        {mostrarResumo && (
+          <div className="rounded-lg border border-primary/30 bg-primary/5 p-3">
+            <div className="flex items-start gap-3">
+              <Building2 className="h-5 w-5 shrink-0 mt-0.5 text-primary" aria-hidden="true" />
+              <div className="min-w-0 flex-1 text-sm">
+                <p className="font-semibold text-foreground break-words">{data.nomeFantasia || data.razaoSocial}</p>
+                {data.nomeFantasia && <p className="text-xs text-muted-foreground break-words">{data.razaoSocial}</p>}
+                <p className="mt-1 text-xs text-muted-foreground break-words">
+                  {data.logradouro}, {data.numero}{data.complemento ? ` - ${data.complemento}` : ""} · {data.bairro} · {data.cidade}/{data.uf} · CEP {data.cep}
+                </p>
+                <p className="mt-1 text-[11px] text-primary">Dados preenchidos pela Receita Federal</p>
+              </div>
+              <Button type="button" variant="ghost" size="sm" className="shrink-0 h-9" onClick={() => setEditando(true)}>
+                <Pencil className="h-4 w-4 mr-1" aria-hidden="true" /> Editar
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {!mostrarResumo && (
         <div className="grid gap-4 md:grid-cols-2">
           <Field id="onb-razao" label="Razão Social" required error={errors.razaoSocial}>
             <Input
@@ -122,22 +169,27 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
             />
           </Field>
         </div>
+        )}
 
         <Field id="onb-segmento" label="Segmento" required error={errors.segmentoId}>
           <SegmentoSelect
             id="onb-segmento"
             value={data.segmentoId}
-            onChange={(v) => update({ segmentoId: v })}
+            onChange={(v) => { setSegmentoSugerido(false); update({ segmentoId: v }); }}
             required
             invalid={Boolean(errors.segmentoId)}
             describedBy={errors.segmentoId ? "onb-segmento-erro" : undefined}
           />
+          {segmentoSugerido && data.segmentoId && (
+            <p className="text-[11px] text-primary">Sugerido pela atividade do CNPJ. Altere se não for o seu caso.</p>
+          )}
         </Field>
       </fieldset>
 
       {/* Endereço */}
+      {!mostrarResumo && (
       <fieldset className="space-y-4">
-        <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <legend className="text-xs font-semibold text-muted-foreground">
           Endereço
         </legend>
         <EnderecoFields
@@ -156,14 +208,15 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
           obrigatorios={["cep", "logradouro", "numero", "bairro", "cidade", "uf"]}
         />
       </fieldset>
+      )}
 
       {/* Contato */}
       <fieldset className="space-y-4">
-        <legend className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <legend className="text-xs font-semibold text-muted-foreground">
           Contato
         </legend>
         <div className="grid gap-4 md:grid-cols-2">
-          <Field id="onb-telefone" label="Telefone" error={errors.telefoneEmpresa}>
+          <Field id="onb-telefone" label="Telefone da empresa" error={errors.telefoneEmpresa}>
             <Input
               id="onb-telefone"
               value={data.telefoneEmpresa}
@@ -176,7 +229,7 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
               aria-describedby={errors.telefoneEmpresa ? "onb-telefone-erro" : undefined}
             />
           </Field>
-          <Field id="onb-whatsapp" label="WhatsApp" required error={errors.whatsappEmpresa}>
+          <Field id="onb-whatsapp" label="WhatsApp da empresa" required error={errors.whatsappEmpresa}>
             <Input
               id="onb-whatsapp"
               value={data.whatsappEmpresa}
@@ -188,8 +241,21 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
               aria-invalid={errors.whatsappEmpresa ? true : undefined}
               aria-describedby={errors.whatsappEmpresa ? "onb-whatsapp-erro" : undefined}
             />
+            {meuWhatsapp && (
+              <label htmlFor="onb-usar-meu-whatsapp" className="flex min-h-9 cursor-pointer items-center gap-2 text-xs text-muted-foreground">
+                <Checkbox
+                  id="onb-usar-meu-whatsapp"
+                  checked={usandoMeuWhatsapp}
+                  onCheckedChange={(v) => update({ whatsappEmpresa: v === true ? maskPhone(meuWhatsapp) : "" })}
+                />
+                Usar o meu WhatsApp ({maskPhone(meuWhatsapp)})
+              </label>
+            )}
           </Field>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Telefones de contato da loja. Seu acesso e seus avisos continuam no WhatsApp que você confirmou no cadastro.
+        </p>
         <Field id="onb-email" label="E-mail" required error={errors.emailEmpresa}>
           <Input
             id="onb-email"

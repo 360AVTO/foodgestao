@@ -1,131 +1,61 @@
-import { useEffect, useState } from "react";
-import { Download, Plus, Share, X } from "lucide-react";
+import { useState } from "react";
+import { Download, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { detectPlatform, isStandalone } from "@/components/pwa/InstallPrompt";
-
-const DISPENSAR_KEY = "portal-instalar-app-dispensado";
-
-type BeforeInstallPromptEvent = Event & {
-  prompt: () => Promise<void>;
-  userChoice: Promise<{ outcome: "accepted" | "dismissed" }>;
-};
+import { InstalacaoAppSheet } from "@/components/pwa/InstalacaoAppSheet";
+import { useConviteInstalacao } from "@/components/pwa/useConviteInstalacao";
 
 /**
- * Convite em destaque, na tela inicial do portal, para o colaborador deixar o
- * atalho do app no celular. Some quando o app já está instalado ou dispensado.
+ * Balão flutuante, logo acima do menu inferior do portal, convidando o
+ * colaborador a deixar o app no celular. Não empurra a página nem cobre o
+ * menu; espera a caixa de cookies, some com o teclado aberto e, fechado,
+ * só volta 14 dias depois (regras em `src/lib/pwa/convite.ts`).
  */
 export function InstalarAppCard() {
-  const [deferred, setDeferred] = useState<BeforeInstallPromptEvent | null>(null);
-  const [instrucoesIos, setInstrucoesIos] = useState(false);
-  const [oculto, setOculto] = useState(true);
+  const { instalacao, visivel, dispensar } = useConviteInstalacao();
+  const [aberto, setAberto] = useState(false);
 
-  useEffect(() => {
-    let cancelado = false;
-    let dispensado = false;
-    try {
-      dispensado = localStorage.getItem(DISPENSAR_KEY) === "1";
-    } catch {
-      dispensado = false;
-    }
-    if (dispensado || isStandalone()) return;
+  if (!instalacao.oferecer) return null;
 
-    // Se o app já está instalado no aparelho (atalho baixado pelo navegador),
-    // não mostra o convite em abas normais do navegador.
-    const nav = navigator as Navigator & {
-      getInstalledRelatedApps?: () => Promise<{ platform?: string }[]>;
-    };
-    nav
-      .getInstalledRelatedApps?.()
-      .then((apps) => {
-        if (!cancelado && apps && apps.length > 0) setOculto(true);
-      })
-      .catch(() => {
-        // API indisponível: segue o fluxo normal
-      });
-
-    const plataforma = detectPlatform();
-    if (plataforma.isIos) {
-      if (plataforma.isInAppBrowser || !plataforma.isSafari) return;
-      setInstrucoesIos(true);
-      setOculto(false);
+  const baixar = async () => {
+    if (instalacao.estrategia === "android_instalar") {
+      const r = await instalacao.instalarNativo();
+      if (r === "aceito") dispensar();
       return;
     }
-
-    // Android/Chrome: só exibe o card quando o navegador liberar o
-    // instalador nativo (beforeinstallprompt); antes disso o clique seria
-    // inoperante.
-    const onPrompt = (e: Event) => {
-      e.preventDefault();
-      setDeferred(e as BeforeInstallPromptEvent);
-      setOculto(false);
-    };
-    const onInstalado = () => setOculto(true);
-    window.addEventListener("beforeinstallprompt", onPrompt);
-    window.addEventListener("appinstalled", onInstalado);
-    return () => {
-      cancelado = true;
-      window.removeEventListener("beforeinstallprompt", onPrompt);
-      window.removeEventListener("appinstalled", onInstalado);
-    };
-  }, []);
-
-  if (oculto) return null;
-
-  const dispensar = () => {
-    try {
-      localStorage.setItem(DISPENSAR_KEY, "1");
-    } catch {
-      // ignora
-    }
-    setOculto(true);
-  };
-
-  const instalar = async () => {
-    if (!deferred) return;
-    await deferred.prompt();
-    const { outcome } = await deferred.userChoice;
-    setDeferred(null);
-    if (outcome === "accepted") setOculto(true);
-    else dispensar();
+    setAberto(true);
   };
 
   return (
-    <div className="rounded-2xl border border-primary/30 bg-primary/5 p-4">
-      <div className="flex items-start gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15">
-          <Download className="h-5 w-5 text-primary" />
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="text-sm font-semibold">Deixe o portal na tela do seu celular</p>
-          {instrucoesIos ? (
-            <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-              Toque em <Share className="inline h-3.5 w-3.5 align-text-bottom" />{" "}
-              <span className="font-medium">Compartilhar</span> e depois em{" "}
-              <span className="font-medium">
-                Adicionar à Tela de Início <Plus className="inline h-3.5 w-3.5 align-text-bottom" />
-              </span>
-              .
-            </p>
-          ) : (
-            <p className="mt-1 text-xs text-muted-foreground">
-              Fica igual a um aplicativo: você abre com um toque, sem digitar o endereço.
-            </p>
-          )}
-          {deferred && !instrucoesIos && (
-            <Button size="sm" className="mt-3" onClick={instalar}>
-              <Download className="mr-2 h-4 w-4" /> Instalar agora
-            </Button>
-          )}
-        </div>
-        <button
-          type="button"
-          onClick={dispensar}
-          aria-label="Fechar"
-          className="shrink-0 text-muted-foreground transition-colors hover:text-foreground"
+    <>
+      {visivel && (
+        <div
+          role="status"
+          aria-live="polite"
+          className="fixed inset-x-3 bottom-[calc(56px+env(safe-area-inset-bottom)+0.75rem)] z-40 animate-in fade-in slide-in-from-bottom-4 duration-300 md:inset-x-auto md:bottom-4 md:right-4 md:max-w-sm"
         >
-          <X className="h-4 w-4" />
-        </button>
-      </div>
-    </div>
+          <div className="flex items-start gap-3 rounded-2xl border border-primary/30 bg-card p-3 shadow-2xl">
+            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/15">
+              <Download className="h-5 w-5 text-primary" aria-hidden="true" />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Baixe o aplicativo no seu celular</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Abra com um toque, sem procurar o link no WhatsApp.</p>
+              <Button size="sm" className="mt-2 min-h-11" onClick={baixar}>
+                <Download className="mr-2 h-4 w-4" aria-hidden="true" /> Baixar aplicativo
+              </Button>
+            </div>
+            <button
+              type="button"
+              onClick={dispensar}
+              aria-label="Fechar aviso de baixar o aplicativo"
+              className="-mr-1 -mt-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-full text-muted-foreground transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+            >
+              <X className="h-5 w-5" aria-hidden="true" />
+            </button>
+          </div>
+        </div>
+      )}
+      <InstalacaoAppSheet open={aberto} onOpenChange={setAberto} instalacao={instalacao} />
+    </>
   );
 }

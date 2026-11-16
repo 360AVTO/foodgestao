@@ -1310,6 +1310,398 @@
       "when": 1793805754132,
       "tag": "0186_desfazer_upgrade_reserva_e_pluggy_duplicata",
       "breakpoints": true
+    },
+    {
+      "idx": 187,
+      "version": "7",
+      "when": 1793822830952,
+      "tag": "0187_unidade_convocacao_automatica_feriados",
+      "breakpoints": true
+    },
+    {
+      "idx": 188,
+      "version": "7",
+      "when": 1793823010710,
+      "tag": "0188_feriado_bloqueia_folga_regular_e_troca_portal",
+      "breakpoints": true
+    },
+    {
+      "idx": 189,
+      "version": "7",
+      "when": 1793825625747,
+      "tag": "0189_feriado_convocacao_automatica_notificar",
+      "breakpoints": true
+    },
+    {
+      "idx": 190,
+      "version": "7",
+      "when": 1793825807475,
+      "tag": "0190_feriado_loja_fechada",
+      "breakpoints": true
+    },
+    {
+      "idx": 191,
+      "version": "7",
+      "when": 1793830268932,
+      "tag": "0191_feriado_regua_gestor",
+      "breakpoints": true
+    },
+    {
+      "idx": 192,
+      "version": "7",
+      "when": 1793836354374,
+      "tag": "0192_folgas_compensatorias_e_notificacoes_contextuais",
+      "breakpoints": true
+    },
+    {
+      "idx": 193,
+      "version": "7",
+      "when": 1793843061884,
+      "tag": "0193_folga_compensatoria_gestor_e_loja_sem_expediente",
+      "breakpoints": true
+    },
+    {
+      "idx": 194,
+      "version": "7",
+      "when": 1793889998906,
+      "tag": "0194_feriado_escala_confirmada",
+      "breakpoints": true
+    },
+    {
+      "idx": 195,
+      "version": "7",
+      "when": 1793893187352,
+      "tag": "0195_migration",
+      "breakpoints": true
+    },
+    {
+      "idx": 196,
+      "version": "7",
+      "when": 1793895521263,
+      "tag": "0196_folga_bloqueio_data_so_colaborador",
+      "breakpoints": true
+    },
+    {
+      "idx": 197,
+      "version": "7",
+      "when": 1793897861771,
+      "tag": "0197_onboarding_trial_por_modulo",
+      "breakpoints": true
+    },
+    {
+      "idx": 198,
+      "version": "7",
+      "when": 1793898416159,
+      "tag": "0198_dp_unidade_inicial_onboarding",
+      "breakpoints": true
+    },
+    {
+      "idx": 199,
+      "version": "7",
+      "when": 1793900875265,
+      "tag": "0199_onboarding_com_unidade_atomico",
+      "breakpoints": true
+    },
+    {
+      "idx": 200,
+      "version": "7",
+      "when": 1793912659419,
+      "tag": "0200_onboarding_concierge",
+      "breakpoints": true
+    },
+    {
+      "idx": 201,
+      "version": "7",
+      "when": 1793917015786,
+      "tag": "0201_concierge_apoio_parametrizacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 202,
+      "version": "7",
+      "when": 1793942118113,
+      "tag": "0202_concierge_entrega_trial_opcional",
+      "breakpoints": true
+    },
+    {
+      "idx": 203,
+      "version": "7",
+      "when": 1793989322904,
+      "tag": "0203_dp_unidade_pagamento_salario",
+      "breakpoints": true
+    },
+    {
+      "idx": 204,
+      "version": "7",
+      "when": 1794003128720,
+      "tag": "0204_preadmissao_encerrar_rotina_valida_ator",
+      "breakpoints": true
+    },
+    {
+      "idx": 205,
+      "version": "7",
+      "when": 1794050576944,
+      "tag": "0205_admin_assinaturas_lista_e_trava_cadastro",
+      "breakpoints": true
+    },
+    {
+      "idx": 206,
+      "version": "7",
+      "when": 1794051439923,
+      "tag": "0206_handle_new_user_subscription_nunca_bloqueia",
+      "breakpoints": true
+    },
+    {
+      "idx": 207,
+      "version": "7",
+      "when": 1794055353230,
+      "tag": "0207_admin_faturas_lista",
+      "breakpoints": true
+    },
+    {
+      "idx": 208,
+      "version": "7",
+      "when": 1794327597948,
+      "tag": "0208_billing_enterprise_por_colaborador",
+      "breakpoints": true
+    },
+    {
+      "idx": 209,
+      "version": "7",
+      "when": 1794328196272,
+      "tag": "0209_franquia_previa_enterprise",
+      "breakpoints": true
+    },
+    {
+      "idx": 210,
+      "version": "7",
+      "when": 1794332514638,
+      "tag": "0210_portal_rotina_cargo_e_folga_fixa",
+      "breakpoints": true
+    },
+    {
+      "idx": 211,
+      "version": "7",
+      "when": 1794333580550,
+      "tag": "0211_folga_remarcar_baixa_pedidos",
+      "breakpoints": true
+    },
+    {
+      "idx": 212,
+      "version": "7",
+      "when": 1794338082986,
+      "tag": "0212_troca_notifica_colega",
+      "breakpoints": true
+    },
+    {
+      "idx": 213,
+      "version": "7",
+      "when": 1794342972947,
+      "tag": "0213_ficha_lote_organizacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 214,
+      "version": "7",
+      "when": 1794346673551,
+      "tag": "0214_franquia_previa_teste_gratis",
+      "breakpoints": true
+    },
+    {
+      "idx": 215,
+      "version": "7",
+      "when": 1794348326702,
+      "tag": "0215_teste_gratis_sem_franquia_colaboradores",
+      "breakpoints": true
+    },
+    {
+      "idx": 216,
+      "version": "7",
+      "when": 1794349332795,
+      "tag": "0216_enterprise_minimo_colaboradores_teste_sem_limites",
+      "breakpoints": true
+    },
+    {
+      "idx": 217,
+      "version": "7",
+      "when": 1794363987435,
+      "tag": "0217_feriados_nacionais_categoria_setores_palavra_unica",
+      "breakpoints": true
+    },
+    {
+      "idx": 218,
+      "version": "7",
+      "when": 1794365334807,
+      "tag": "0218_ficha_lote_padroes_rascunhos",
+      "breakpoints": true
+    },
+    {
+      "idx": 219,
+      "version": "7",
+      "when": 1794369510983,
+      "tag": "0219_ficha_lote_notificar_whatsapp_email",
+      "breakpoints": true
+    },
+    {
+      "idx": 220,
+      "version": "7",
+      "when": 1794401185709,
+      "tag": "0220_onboarding_preserva_whatsapp_pessoal",
+      "breakpoints": true
+    },
+    {
+      "idx": 221,
+      "version": "7",
+      "when": 1794403741270,
+      "tag": "0221_ficha_lote_ponto_persistido",
+      "breakpoints": true
+    },
+    {
+      "idx": 222,
+      "version": "7",
+      "when": 1794404884009,
+      "tag": "0222_ficha_reativar_ignorada",
+      "breakpoints": true
+    },
+    {
+      "idx": 223,
+      "version": "7",
+      "when": 1794413529294,
+      "tag": "0223_folga_marcacao_portal_trava",
+      "breakpoints": true
+    },
+    {
+      "idx": 224,
+      "version": "7",
+      "when": 1794414804101,
+      "tag": "0224_sindicatos_base_unica_catalogo",
+      "breakpoints": true
+    },
+    {
+      "idx": 225,
+      "version": "7",
+      "when": 1794416960776,
+      "tag": "0225_assinatura_papel_vigencia",
+      "breakpoints": true
+    },
+    {
+      "idx": 226,
+      "version": "7",
+      "when": 1794420237841,
+      "tag": "0226_escala_12x36_plantao_alternado",
+      "breakpoints": true
+    },
+    {
+      "idx": 227,
+      "version": "7",
+      "when": 1794420293723,
+      "tag": "0227_escala_12x36_revoga_rotinas_internas",
+      "breakpoints": true
+    },
+    {
+      "idx": 228,
+      "version": "7",
+      "when": 1794421673355,
+      "tag": "0228_escala_12x36_calendario_descanso",
+      "breakpoints": true
+    },
+    {
+      "idx": 229,
+      "version": "7",
+      "when": 1794425926024,
+      "tag": "0229_sindicato_vincular_cargos_sem_laboral",
+      "breakpoints": true
+    },
+    {
+      "idx": 230,
+      "version": "7",
+      "when": 1794429860409,
+      "tag": "0230_feriado_convocacao_sem_portal_e_12x36",
+      "breakpoints": true
+    },
+    {
+      "idx": 231,
+      "version": "7",
+      "when": 1794429974753,
+      "tag": "0231_feriados_resolver_rotinas_agendadas",
+      "breakpoints": true
+    },
+    {
+      "idx": 232,
+      "version": "7",
+      "when": 1794431788851,
+      "tag": "0232_troca_folga_independente_da_marcacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 233,
+      "version": "7",
+      "when": 1794439942100,
+      "tag": "0233_ficha_lote_ciencia_intervalo_reduzido",
+      "breakpoints": true
+    },
+    {
+      "idx": 234,
+      "version": "7",
+      "when": 1794456904309,
+      "tag": "0234_adiantamento_antecedencia_portal_relacao",
+      "breakpoints": true
+    },
+    {
+      "idx": 235,
+      "version": "7",
+      "when": 1794489565065,
+      "tag": "0235_app_error_log_empresa_automatica",
+      "breakpoints": true
+    },
+    {
+      "idx": 236,
+      "version": "7",
+      "when": 1794540242796,
+      "tag": "0236_folga_fds_ninguem_sem_folga",
+      "breakpoints": true
+    },
+    {
+      "idx": 237,
+      "version": "7",
+      "when": 1794540486581,
+      "tag": "0237_folga_auto_dias_trabalhados",
+      "breakpoints": true
+    },
+    {
+      "idx": 238,
+      "version": "7",
+      "when": 1794541088138,
+      "tag": "0238_folga_reavaliacao_conservadora",
+      "breakpoints": true
+    },
+    {
+      "idx": 239,
+      "version": "7",
+      "when": 1794544855441,
+      "tag": "0239_folga_dia_lotado_pede_gestor",
+      "breakpoints": true
+    },
+    {
+      "idx": 240,
+      "version": "7",
+      "when": 1794576189083,
+      "tag": "0240_folga_limite_fixos_mais_vagas",
+      "breakpoints": true
+    },
+    {
+      "idx": 241,
+      "version": "7",
+      "when": 1794765690142,
+      "tag": "0241_dp_documentos_lixeira",
+      "breakpoints": true
+    },
+    {
+      "idx": 242,
+      "version": "7",
+      "when": 1794771503452,
+      "tag": "0242_assinatura_desligado_no_prazo",
+      "breakpoints": true
     }
   ]
 }

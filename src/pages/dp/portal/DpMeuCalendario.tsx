@@ -8,6 +8,9 @@ import { MOTIVO_COMPENSACAO_FERIADO, diasDeAntecedencia, motivoLegivel } from "@
 import { AssinaturaConfirmarDialog } from "@/components/dp/portal/AssinaturaConfirmarDialog";
 import { assinarTroca } from "@/lib/dp/troca-assinatura";
 import { CienciaFaltaTrocaBox, TEXTO_CIENCIA_FALTA_TROCA } from "@/components/dp/CienciaFaltaTrocaBox";
+import { PedirDispensaFeriado } from "@/components/dp/portal/PedirDispensaFeriado";
+import { ROTULO_DESCANSO_12X36 } from "@/lib/dp/escala-12x36";
+import { AvisoConvocacaoFeriado, SeloConvocado, useMinhasConvocacoesFeriado } from "@/components/dp/portal/ConvocacaoFeriadoPortal";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Helmet } from "react-helmet-async";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -21,11 +24,13 @@ import {
   ArrowLeftRight,
   CalendarDays,
   CalendarClock,
+  Flame,
   ChevronLeft,
   ChevronRight,
   Lock,
   Send,
   User as UserIcon,
+  HandCoins,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "@/hooks/useAuth";
@@ -50,6 +55,8 @@ import { ocupacaoNoEscopo, resolverLimiteFolga } from "@/lib/dp/folga-limites";
 import {
   resolverJanela,
   podeMarcarNormal,
+  temDireitoMesCorrente,
+  marcacaoPortalLiberada,
   mensagemJanela,
   type JanelaResolvida,
 } from "@/lib/dp/folga-janela";
@@ -63,8 +70,9 @@ import {
 } from "@/components/ui/select";
 import { useDpRegrasColaborador } from "@/hooks/useDpRegrasColaborador";
 import { resumoEscolhaFolgas, folgaDominicalAutomatica, podeTrocarFolga, domingosFolgaNoPeriodo } from "@/lib/dp/dsr-rules";
-import { folgasOfertaveis, dataEmAfastamento, type PeriodoAfastamento } from "@/lib/dp/troca-oferta";
-import { mensagemErroTroca } from "@/lib/dp/trocas-erros";
+import { trocaLiberadaNoPortal } from "@/lib/dp/folga-regras-blocos";
+import { folgasOfertaveis, dataEmAfastamento, trocasAbertasComColegas, type PeriodoAfastamento } from "@/lib/dp/troca-oferta";
+import { erroTroca } from "@/lib/dp/trocas-erros";
 import { avaliarRiscoDsrTroca, avisoDsr } from "@/lib/dp/dsr-consecutivo";
 import { registrarCienciaDsr } from "@/lib/dp/dsr-ciencia";
 import { CienciaDsrBox } from "@/components/dp/CienciaDsrBox";
@@ -75,6 +83,8 @@ import {
   trocaExigeAprovacaoGestor,
   motivoAprovacaoGestor,
   mesmaSemana,
+  meuPedidoPendenteNoDia,
+  ehMudancaDeFolga,
 } from "@/lib/dp/folga-remarcacao";
 
 
@@ -84,6 +94,7 @@ import {
   dayType,
   getMonthDays,
   diasFixosDeFolga,
+  folgaFixaNaData,
   formatBR,
   monthKey,
   normalizeWeekday,
@@ -95,6 +106,13 @@ import {
 } from "@/lib/dp/folga-rules";
 import { buildBloqueiosDeRegras, type RegraRow } from "@/lib/dp/bloqueio-rules";
 import { cn } from "@/lib/utils";
+import { diaEhPico } from "@/lib/dp/calendario-rotina";
+import { agruparFeriadosDia, textoFeriadosDia, type FeriadoDia } from "@/lib/dp/feriados-apresentacao";
+import { FERIADO_CATEGORIA_LABEL, type FeriadoCategoria } from "@/lib/dp/feriados";
+import { useMeusPagamentosMarcos } from "@/hooks/useDpPagamentosMarcos";
+import { PagamentosDoDia, PilulaPagamento } from "@/components/dp/calendario/PagamentosDia";
+import { AdiantamentoPortalAcao } from "@/components/dp/adiantamento/AdiantamentoPortalAcao";
+import { useMeuAdiantamento } from "@/hooks/useMeuAdiantamento";
 import { DiasEmLista, type DiaEmLista } from "@/components/dp/DiasEmLista";
 import { SocioBloqueioDialog } from "@/components/dp/SocioBloqueioDialog";
 import { isSocio } from "@/lib/dp/contrato-policy";
@@ -102,6 +120,7 @@ import { MinhaDisponibilidadeCard } from "@/components/dp/MinhaDisponibilidadeCa
 import { MeusPlantoesTrocaCard } from "@/components/dp/convocacoes/MeusPlantoesTrocaCard";
 import { pessoaConvocavel } from "@/lib/dp/convocacoes-planejamento";
 import { notifyError } from "@/lib/notifyError";
+import { mensagemPedidoDiaLotado, pedidoDiaLotadoNoMes } from "@/lib/dp/folga-dia-lotado";
 import { negarRegra } from "@/lib/dp/regraAviso";
 import { lancarErroSolicitacao } from "@/lib/dp/regraServidor";
 const hojeLocalIso = () => new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
@@ -114,6 +133,8 @@ interface JanelaRemota {
   hoje: string;
   competencia: string;
   estado: string;
+  /** false = escala de folgas definida só pela administração (portal só consulta). */
+  marcacao_portal?: boolean;
 }
 
 const STATUS_LABEL: Record<DateStatusKind, string> = {
@@ -122,6 +143,7 @@ const STATUS_LABEL: Record<DateStatusKind, string> = {
   fixed: "Folga semanal",
   blocked: "Bloqueado",
   taken: "Lotado",
+  quota: "Pode mudar sua folga",
   past: "Passado",
   pending: "Pendente",
   birthday: "Aniversariante",
@@ -135,6 +157,7 @@ const STATUS_BADGE: Record<DateStatusKind, string> = {
   fixed: "bg-blue-500/10 text-blue-700 border-blue-200",
   blocked: "bg-red-500/10 text-red-700 border-red-200",
   taken: "bg-red-500/10 text-red-700 border-red-200",
+  quota: "bg-sky-500/10 text-sky-700 border-sky-200",
   past: "bg-muted text-muted-foreground border-transparent",
   pending: "bg-violet-500/10 text-violet-700 border-violet-200",
   birthday: "bg-amber-500/10 text-amber-700 border-amber-200",
@@ -281,6 +304,34 @@ export default function DpMeuCalendario() {
   /** No padrão CLT o sistema gera a folga dominical — o colaborador não marca nem remove. */
   const folgaCltAutomatica = folgaDominicalAutomatica(regrasConfig);
 
+  /** Feriados da minha loja no mês, com a mesma fonte e apresentação do gestor. */
+  const feriadosQuery = useQuery({
+    queryKey: ["dp_meus_feriados_cal", myUnidade, range.start, range.end],
+    enabled: !!myUnidade,
+    staleTime: 10 * 60_000,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("dp_feriados_resolver_v2", {
+        _unidade_id: myUnidade!,
+        _inicio: range.start,
+        _fim: range.end,
+      });
+      if (error) throw error;
+      return agruparFeriadosDia(
+        (data ?? []).map((f) => ({ data: f.data, nome: f.nome, categoria: f.categoria as FeriadoCategoria, unidade_id: myUnidade! })),
+        myUnidade,
+        [],
+      );
+    },
+  });
+  const feriadosPorDia = feriadosQuery.data ?? new Map<string, FeriadoDia[]>();
+  const feriadoDoDia = (iso: string) => {
+    const feriados = feriadosPorDia.get(iso) ?? [];
+    return { feriados, feriado_nome: feriados.length ? feriados.map((f) => f.nome).join(" • ") : null };
+  };
+  /** Previsões de salário, adiantamento e VA que valem para mim neste mês. */
+  const pagamentos = useMeusPagamentosMarcos(`${ano}-${String(mes).padStart(2, "0")}`, !!meRef.data?.id);
+  const meuAdiantamento = useMeuAdiantamento(!!meRef.data?.id);
+
   /** Atestados e faltas do próprio colaborador, marcados no calendário dele. */
   const marcadoresQuery = useQuery({
     queryKey: ["dp_meus_marcadores_calendario", meRef.data?.id, range.start, range.end],
@@ -346,6 +397,17 @@ export default function DpMeuCalendario() {
   }, [janelaQuery.data]);
 
   const avisoJanela = janela.estado === "inativa" ? "" : mensagemJanela(janela, formatBR);
+  /**
+   * Loja com escala de folgas definida pela administração: o calendário vira
+   * consulta. Enquanto a regra carrega, as ações ficam escondidas (o servidor
+   * recusa de qualquer forma).
+   */
+  const portalLivre = janelaQuery.isPending ? false : marcacaoPortalLiberada(janelaQuery.data);
+  // Troca entre colegas segue só a regra de troca da unidade, independente da escolha de folgas.
+  const trocaLivre = trocaLiberadaNoPortal(regrasConfig);
+  const TEXTO_ESCALA_ADMIN = trocaLivre
+    ? "A escala de folgas desta loja é definida pela administração. Você ainda pode combinar troca de folga com um colega tocando no dia em que ele está de folga."
+    : "A escala de folgas desta loja é definida pela administração. Se precisar mudar alguma folga, fale com o seu gestor.";
 
 
 
@@ -365,6 +427,7 @@ export default function DpMeuCalendario() {
         nome: c.nome_social || c.nome,
         folga_fixa_semana: c.folga_fixa_semana ?? null,
         folgas_fixas_dow: Array.isArray(c.folgas_fixas_dow) ? c.folgas_fixas_dow.map(Number) : null,
+        plantao_12x36: c.plantao_12x36 ?? null,
         ativo: c.ativo,
         unidade_id: c.unidade_id,
       })) as ColaboradorRecord[];
@@ -414,7 +477,7 @@ export default function DpMeuCalendario() {
     queryFn: async () => {
       const { data, error } = await supabase
         .from("dp_solicitacoes")
-        .select("id, colaborador_id, data_alvo, tipo, status, dp_colaboradores(nome, unidade_id)")
+        .select("id, colaborador_id, data_alvo, data_fim, motivo, tipo, status, excede_limite_dia, dp_colaboradores(nome, unidade_id)")
         .is("removido_em", null)
         .eq("company_id", companyId!)
         .eq("status", "pendente")
@@ -500,6 +563,8 @@ export default function DpMeuCalendario() {
   const trocasPendentesQuery = useQuery({
     queryKey: ["dp_trocas_pend_meu_cal", companyId],
     enabled: !!companyId,
+    // A resposta do colega chega de outro aparelho: atualiza junto com a rotina da loja.
+    refetchInterval: 30_000,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("dp_trocas")
@@ -596,14 +661,51 @@ export default function DpMeuCalendario() {
     },
   });
 
+  /**
+   * Escala 12x36 vigente: devolve a data do primeiro plantão. O descanso segue
+   * o dia sim, dia não (Art. 59-A), nunca o dia da semana.
+   */
+  const hojeCiclo = ymd(new Date());
+  const meuCiclo12x36Query = useQuery({
+    queryKey: ["dp_meu_ciclo_12x36", meRef.data?.id, hojeCiclo],
+    enabled: !!meRef.data?.id,
+    queryFn: async (): Promise<string | null> => {
+      const { data, error } = await supabase
+        .from("dp_colaborador_config_trabalho")
+        .select("escala_modelo, data_primeiro_plantao")
+        .eq("colaborador_id", meRef.data!.id)
+        .lte("vigencia_inicio", hojeCiclo)
+        .or(`vigencia_fim.is.null,vigencia_fim.gte.${hojeCiclo}`)
+        .order("vigencia_inicio", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      if (error) throw error;
+      return data?.escala_modelo === "12x36" ? (data.data_primeiro_plantao as string | null) ?? null : null;
+    },
+  });
+  const meuPlantao12x36 = meuCiclo12x36Query.data ?? null;
+  const meu12x36 = !!meuPlantao12x36;
+  /** Meu descanso fixo numa data: ciclo 12x36 ou dia(s) da semana da folga fixa. */
+  const ehMinhaFolgaFixa = (d: Date) =>
+    folgaFixaNaData(
+      {
+        folga_fixa_semana: meRef.data?.folga_fixa_semana ?? null,
+        folgas_fixas_dow: meusDiasFixosQuery.data ?? [],
+        plantao_12x36: meuPlantao12x36,
+      },
+      d,
+    );
+
   const colaboradoresAll = useMemo(() => {
     const lista = colaboradoresQuery.data ?? [];
     const fixos = meusDiasFixosQuery.data ?? [];
-    if (!fixos.length || !meRef.data?.id) return lista;
+    if ((!fixos.length && !meuPlantao12x36) || !meRef.data?.id) return lista;
     return lista.map((c) =>
-      c.id === meRef.data!.id ? { ...c, folgas_fixas_dow: fixos } : c,
+      c.id === meRef.data!.id
+        ? { ...c, folgas_fixas_dow: fixos.length ? fixos : c.folgas_fixas_dow, plantao_12x36: meuPlantao12x36 ?? c.plantao_12x36 ?? null }
+        : c,
     );
-  }, [colaboradoresQuery.data, meusDiasFixosQuery.data, meRef.data?.id]);
+  }, [colaboradoresQuery.data, meusDiasFixosQuery.data, meRef.data?.id, meuPlantao12x36]);
   // Filtra colaboradores da minha unidade (se eu tiver)
   const colaboradores = useMemo(
     () => (myUnidade ? colaboradoresAll.filter((c) => c.unidade_id === myUnidade) : colaboradoresAll),
@@ -640,6 +742,8 @@ export default function DpMeuCalendario() {
     const avisoFerias = temFerias
       ? " Neste mês você tem férias: sua folga fica restrita aos dias em que você trabalha, com prioridade para os dias mais próximos da saída e do retorno."
       : "";
+    if (meu12x36)
+      return "Sua escala é 12x36: você descansa dia sim, dia não, e os domingos de descanso já vêm do próprio ciclo. Não há folga para escolher no mês.";
     if (previstas <= 0)
       return `Neste mês a regra da sua loja não prevê folga ${rotulo}.` + avisoFerias;
     const minhas = folgas.filter(
@@ -676,6 +780,7 @@ export default function DpMeuCalendario() {
     domingosMesEfetivo,
     folgas,
     folgaCltAutomatica,
+    meu12x36,
     meRef.data,
     meusDiasFixosQuery.data,
     range.endDate,
@@ -896,7 +1001,7 @@ export default function DpMeuCalendario() {
       folga_fixa_semana: meRef.data?.folga_fixa_semana ?? null,
       folgas_fixas_dow: meusDiasFixosQuery.data ?? [],
     });
-    if (!fixos.length || !meRef.data?.id) return [] as { id: string; data: string; fixa: true }[];
+    if ((!fixos.length && !meuPlantao12x36) || !meRef.data?.id) return [] as { id: string; data: string; fixa: true }[];
     const comRegistro = new Set(
       folgas.filter((f) => f.colaborador_id === meRef.data!.id && f.status !== "cancelada").map((f) => f.data as string),
     );
@@ -904,7 +1009,7 @@ export default function DpMeuCalendario() {
     const hojeD = parseYMD(hojeIso);
     const fimProximoMes = new Date(hojeD.getFullYear(), hojeD.getMonth() + 2, 0);
     return eachDayOfInterval({ start: hojeD, end: fimProximoMes })
-      .filter((d) => fixos.includes(d.getDay()))
+      .filter((d) => ehMinhaFolgaFixa(d))
       .map((d) => ymd(d))
       .filter((iso) => iso >= hojeIso && !comRegistro.has(iso))
       // Folga fixa já cedida numa troca: nesse dia agora trabalha, não pode ser oferecida de novo.
@@ -914,7 +1019,7 @@ export default function DpMeuCalendario() {
       // Folga coberta por atestado, licença, suspensão ou férias não é negociável.
       .filter((iso) => !dataEmAfastamento(afastamentosQuery.data, meRef.data!.id, iso))
       .map((iso) => ({ id: `fixa-${iso}`, data: iso, fixa: true as const }));
-  }, [meRef.data, meusDiasFixosQuery.data, folgas, range.startDate, range.endDate, hojeIso, trabalhoExcepcionalQuery.data, diasEmTrocaPendente, afastamentosQuery.data]);
+  }, [meRef.data, meusDiasFixosQuery.data, meuPlantao12x36, folgas, range.startDate, range.endDate, hojeIso, trabalhoExcepcionalQuery.data, diasEmTrocaPendente, afastamentosQuery.data]);
 
   /** Folgas ofertáveis para o dia aberto no diálogo (sem o próprio dia pedido). */
   const folgasParaOferecer = useMemo(() => {
@@ -959,12 +1064,13 @@ export default function DpMeuCalendario() {
   }, [temCompensacao, excecaoModo, regraUnidade.isLoading]);
   const [excecaoDiaTrabalho, setExcecaoDiaTrabalho] = useState("");
   const fixasParaExcecao = useMemo(() => {
-    if (!selectedDay) return [];
+    // 12x36 não tem folga semanal: mudar o descanso do ciclo é decisão do gestor.
+    if (!selectedDay || meu12x36) return [];
     const alvo = parseYMD(selectedDay.iso).getTime();
     return minhasFixasFuturas
       .filter((f) => f.data !== selectedDay.iso)
       .sort((a, b) => Math.abs(parseYMD(a.data).getTime() - alvo) - Math.abs(parseYMD(b.data).getTime() - alvo));
-  }, [minhasFixasFuturas, selectedDay]);
+  }, [minhasFixasFuturas, selectedDay, meu12x36]);
 
 
   // -------- Mutations --------
@@ -984,8 +1090,25 @@ export default function DpMeuCalendario() {
         negarRegra('Apenas fins de semana podem ser marcados diretamente. Use "Solicitar exceção".');
       }
 
-      // 2a) período mensal de escolha (só o início da escolha é restrito)
-      if (!podeMarcarNormal(janela, d)) {
+      // Folga de fim de semana já marcada no mês desta data?
+      const mk = monthKey(d);
+      const jaTem = folgas.some(
+        (f) =>
+          f.colaborador_id === meRef.data!.id &&
+          monthKey(parseYMD(f.data)) === mk &&
+          f.extra !== true &&
+          f.status !== "cancelada" &&
+          [0, 6].includes(parseYMD(f.data).getDay()),
+      );
+      const direitoMes = {
+        hoje: janelaQuery.data?.hoje ? parseYMD(janelaQuery.data.hoje) : hoje,
+        semFolgaFdsNoMes: !jaTem,
+      };
+      const direitoMesCorrente = temDireitoMesCorrente(d, direitoMes);
+
+      // 2a) período mensal de escolha (só o início da escolha é restrito);
+      // quem está sem a folga do mês em curso sempre pode marcá-la.
+      if (!podeMarcarNormal(janela, d, direitoMes)) {
         const alvo = janela.competencia.toLocaleDateString("pt-BR", {
           month: "long",
           year: "numeric",
@@ -1012,6 +1135,9 @@ export default function DpMeuCalendario() {
         folga_fixa_semana: meRef.data.folga_fixa_semana,
         folgas_fixas_dow: meusDiasFixosQuery.data ?? [],
       });
+      if (meu12x36) {
+        negarRegra("Sua escala é 12x36: o descanso segue o ciclo dia sim, dia não. Para mudar, fale com o seu gestor.");
+      }
       if (fixos.includes(wd)) {
         negarRegra('Este é seu dia de folga fixa. Use "Solicitar exceção" ou uma troca.');
       }
@@ -1023,15 +1149,6 @@ export default function DpMeuCalendario() {
       if (jaNoDia) negarRegra("Você já tem folga marcada neste dia.");
 
       // 5) limite mensal (1 folga de fim de semana)
-      const mk = monthKey(d);
-      const jaTem = folgas.some(
-        (f) =>
-          f.colaborador_id === meRef.data!.id &&
-          monthKey(parseYMD(f.data)) === mk &&
-          f.extra !== true &&
-          f.status !== "cancelada" &&
-          [0, 6].includes(parseYMD(f.data).getDay()),
-      );
       if (jaTem)
         negarRegra(
           "Você já possui uma folga de fim de semana neste mês. Remova a folga atual para escolher outra data.",
@@ -1052,11 +1169,15 @@ export default function DpMeuCalendario() {
       });
       if (limiteErr) throw limiteErr;
       const limiteInfo = (limiteDia ?? {}) as Record<string, any>;
+      // Dia lotado nunca entra direto, nem para quem está sem folga no mês:
+      // nesse caso o pedido vai ao gestor ("Solicitar folga ao gestor").
       if (limiteInfo.excedido) {
         negarRegra(
-          limiteInfo.reserva && limiteInfo.reserva > 0
-            ? "Data indisponível. Vagas reservadas por indisponibilidade de convocáveis."
-            : "Data indisponível. Limite de folgas atingido.",
+          direitoMesCorrente
+            ? 'Este dia está lotado. Toque em "Solicitar folga ao gestor" para ele avaliar.'
+            : limiteInfo.reserva && limiteInfo.reserva > 0
+              ? "Data indisponível. Vagas reservadas por indisponibilidade de convocáveis."
+              : "Data indisponível. Limite de folgas atingido.",
         );
       }
 
@@ -1085,7 +1206,11 @@ export default function DpMeuCalendario() {
         if (raw.includes("FOLGA_FORA_DA_JANELA"))
           negarRegra('Fora do período de escolha das folgas. Use "Solicitar exceção".');
         if (raw.includes("FOLGA_LIMITE_DIA"))
-          negarRegra("Data indisponível. Limite de folgas atingido.");
+          negarRegra(
+            direitoMesCorrente
+              ? 'Este dia acabou de lotar. Toque em "Solicitar folga ao gestor" para ele avaliar.'
+              : "Data indisponível. Limite de folgas atingido.",
+          );
         if (raw.includes("FOLGA_INCOMPATIBILIDADE"))
           negarRegra(
             raw.split("FOLGA_INCOMPATIBILIDADE:").pop()?.trim() ||
@@ -1108,6 +1233,25 @@ export default function DpMeuCalendario() {
       }
     },
     onError: (e: any) => notifyError(e, { surface: "Meu calendário", action: "concluir a ação", fallback: "Erro ao marcar folga" }),
+  });
+
+  // Folga do mês em dia lotado: nunca entra direto, vira pedido ao gestor.
+  const pedirDiaLotado = useMutation({
+    mutationFn: async (iso: string) => {
+      const { error } = await supabase.rpc("dp_folga_solicitar_mes_lotado", { p_data: iso, p_motivo: null } as never);
+      if (error) {
+        const msg = mensagemPedidoDiaLotado(error.message ?? "");
+        if (msg) negarRegra(msg);
+        lancarErroSolicitacao(error);
+      }
+    },
+    onSuccess: () => {
+      toast.success("Pedido enviado ao gestor. A folga só vale depois que ele aprovar.");
+      setSelectedDay(null);
+      qc.invalidateQueries({ queryKey: ["dp_solic_meu_cal"] });
+      qc.invalidateQueries({ queryKey: ["dp_folgas_meu_cal"] });
+    },
+    onError: (e: any) => notifyError(e, { surface: "Meu calendário", action: "enviar o pedido ao gestor", fallback: "Erro ao enviar o pedido" }),
   });
 
   const removerFolga = useMutation({
@@ -1310,7 +1454,7 @@ export default function DpMeuCalendario() {
         p_data_proposta: tradeOpen.iso,
         p_motivo: motivo,
       });
-      if (error) throw new Error(mensagemErroTroca(error.message));
+      if (error) throw erroTroca(error.message);
       const trocaId = (res as { troca_id?: string } | null)?.troca_id;
       if (!trocaId) throw new Error("A troca não foi registrada. Atualize a tela e tente de novo.");
       await assinarTroca(trocaId, assinatura);
@@ -1330,8 +1474,16 @@ export default function DpMeuCalendario() {
       setTradeMotivo("");
       setCienteFaltaTroca(false);
       setSelectedDay(null);
+      // Sem isso o dia continuava oferecendo "Trocar" e o reenvio esbarrava na duplicidade.
+      qc.invalidateQueries({ queryKey: ["dp_trocas_pend_meu_cal"] });
+      qc.invalidateQueries({ queryKey: ["dp_meu_trocas"] });
+      invalidarRotinaLoja();
     },
-    onError: (e: any) => notifyError(e, { surface: "Meu calendário", action: "concluir a ação", fallback: "Erro ao solicitar troca" }),
+    onError: (e: any) => {
+      // Proposta igual já registrada: atualiza a tela para mostrar a espera.
+      if (String(e?.message ?? "").includes("troca pendente ou aprovada")) qc.invalidateQueries({ queryKey: ["dp_trocas_pend_meu_cal"] });
+      notifyError(e, { surface: "Meu calendário", action: "concluir a ação", fallback: "Erro ao solicitar troca" });
+    },
   });
 
   /** Dias do mês para onde a folga aberta no diálogo pode ser movida. */
@@ -1403,7 +1555,7 @@ export default function DpMeuCalendario() {
       folga_fixa_semana: meRef.data?.folga_fixa_semana ?? null,
       folgas_fixas_dow: meusDiasFixosQuery.data ?? [],
     });
-    if (fixos.length) {
+    if (fixos.length || meuPlantao12x36) {
       // A folga fixa vale em qualquer semana: cobre também as semanas vizinhas
       // ao mês aberto, senão a contagem de dias seguidos "vaza" para fora do mês.
       for (const d of eachDayOfInterval({
@@ -1411,7 +1563,7 @@ export default function DpMeuCalendario() {
         end: addDays(range.endDate, 21),
       })) {
         const iso = ymd(d);
-        if (!fixos.includes(d.getDay())) continue;
+        if (!ehMinhaFolgaFixa(d)) continue;
         if (trabalhoExcepcionalQuery.data?.has(`${meuId}|${iso}`)) continue;
         s.add(iso);
       }
@@ -1421,6 +1573,7 @@ export default function DpMeuCalendario() {
     folgas,
     meRef.data,
     meusDiasFixosQuery.data,
+    meuPlantao12x36,
     range.startDate,
     range.endDate,
     trabalhoExcepcionalQuery.data,
@@ -1483,7 +1636,7 @@ export default function DpMeuCalendario() {
         await assinarTroca(id, assinatura);
       }
       const { data, error } = await supabase.rpc("dp_troca_responder_colega", { p_id: id, p_aceito: aceito });
-      if (error) throw new Error(mensagemErroTroca(error.message));
+      if (error) throw erroTroca(error.message);
       return { aceito, efetivada: !!(data as { efetivada?: boolean } | null)?.efetivada, id };
     },
     onSuccess: ({ aceito, efetivada, id }) => {
@@ -1505,7 +1658,7 @@ export default function DpMeuCalendario() {
   const cancelarTroca = useMutation({
     mutationFn: async (id: string) => {
       const { error } = await supabase.rpc("dp_troca_cancelar_self", { p_id: id });
-      if (error) throw new Error(mensagemErroTroca(error.message));
+      if (error) throw erroTroca(error.message);
     },
     onSuccess: () => {
       toast.success("Pedido de troca cancelado.");
@@ -1524,31 +1677,60 @@ export default function DpMeuCalendario() {
 
 
 
+  /** O próprio colaborador desiste de um pedido de folga ainda pendente. */
+  const cancelarPedido = useMutation({
+    mutationFn: async (id: string) => {
+      const { error } = await supabase.rpc("dp_solicitacao_cancelar", { p_id: id });
+      if (error) {
+        if ((error.message ?? "").includes("STATUS_INVALIDO"))
+          negarRegra("Este pedido já foi respondido pelo gestor. Atualize a tela para ver a decisão.");
+        throw error;
+      }
+    },
+    onSuccess: () => {
+      toast.success("Pedido cancelado. O dia ficou livre de novo.");
+      setSelectedDay(null);
+      qc.invalidateQueries({ queryKey: ["dp_solic_meu_cal"] });
+      qc.invalidateQueries({ queryKey: ["dp_meus_devolvidos"] });
+      invalidarRotinaLoja();
+    },
+    onError: (e: any) =>
+      notifyError(e, {
+        surface: "Meu calendário",
+        action: "cancelar o pedido",
+        fallback: "Não foi possível cancelar o pedido. Atualize a tela e tente de novo.",
+      }),
+  });
+
   const remarcarFolga = useMutation({
     mutationFn: async () => {
       if (!remarcarOpen) throw new Error("Sem contexto");
       if (!remarcarNova) negarRegra("Escolha o novo dia da sua folga.");
-      const { error } = await supabase.rpc("dp_folga_remarcar", {
+      const { data, error } = await supabase.rpc("dp_folga_remarcar", {
         p_data_atual: remarcarOpen,
         p_data_nova: remarcarNova,
         p_motivo: remarcarMotivo.trim() || null,
       });
-      if (error) {
-        const raw = error.message ?? "";
-        const msg = mensagemErroRemarcacao(raw);
-        if (pedirAoDp(raw)) {
-          setRemarcarAviso(msg);
-          const aviso = new Error(msg);
-          (aviso as any).avisoTratado = true;
-          throw aviso;
-        }
-        throw new Error(msg);
+      if (!error) return Number((data as any)?.pedidos_cancelados ?? 0);
+      const raw = error.message ?? "";
+      const msg = mensagemErroRemarcacao(raw);
+      if (pedirAoDp(raw)) {
+        setRemarcarAviso(msg);
+        const aviso = new Error(msg);
+        (aviso as any).avisoTratado = true;
+        throw aviso;
       }
+      throw new Error(msg);
     },
-    onSuccess: () => {
+    onSuccess: (pedidosCancelados) => {
       if (riscoDsrRemarcar)
         void registrarCienciaDsr({ papel: "colaborador", tabela: "dp_folgas", data: riscoDsrRemarcar.data, dias: riscoDsrRemarcar.sequencia });
-      toast.success("Folga mudada de dia. O setor de pessoal foi avisado.");
+      toast.success(
+        pedidosCancelados > 0
+          ? "Folga mudada de dia. Seu pedido anterior ao gestor foi encerrado, porque não é mais necessário."
+          : "Folga mudada de dia. O setor de pessoal foi avisado.",
+      );
+      qc.invalidateQueries({ queryKey: ["dp_solic_meu_cal"] });
       setRemarcarOpen(null);
       setRemarcarNova("");
       setRemarcarMotivo("");
@@ -1653,8 +1835,38 @@ export default function DpMeuCalendario() {
    * Exceção também vale em dia de meio de semana: é justamente nele que o
    * colaborador precisa pedir uma folga fora da regra.
    */
+  const convocacoesFeriado = useMinhasConvocacoesFeriado(meRef.data?.id);
+  const convocadoNoDia = !!selectedDay && (convocacoesFeriado.data ?? []).some((c) => c.data === selectedDay.iso);
+
+  /** Rótulo do status do dia; no 12x36 a folga fixa é o descanso do ciclo. */
+  const rotuloStatus = (st: DateStatusKind) => (st === "fixed" && meu12x36 ? ROTULO_DESCANSO_12X36 : STATUS_LABEL[st]);
+
+  // Sábado/domingo lotado do mês em curso para quem ainda está sem a folga do mês.
+  const diaLotadoComDireito =
+    !!selectedDay &&
+    selectedDay.status === "taken" &&
+    [0, 6].includes(parseYMD(selectedDay.iso).getDay()) &&
+    !meu12x36 &&
+    temDireitoMesCorrente(parseYMD(selectedDay.iso), {
+      hoje: janelaQuery.data?.hoje ? parseYMD(janelaQuery.data.hoje) : new Date(),
+      semFolgaFdsNoMes: !folgas.some(
+        (f) =>
+          f.colaborador_id === meRef.data?.id &&
+          f.data.slice(0, 7) === selectedDay.iso.slice(0, 7) &&
+          f.extra !== true &&
+          f.status !== "cancelada" &&
+          [0, 6].includes(parseYMD(f.data).getDay()),
+      ),
+    });
+  const pedidoLotadoDoMes = selectedDay
+    ? (pedidoDiaLotadoNoMes(pendentes, meRef.data?.id, selectedDay.iso) as { data_alvo: string } | null)
+    : null;
+
   const showExceptionBtn =
-    selectedDay && !["past", "mine", "fixed", "pending", "swapped"].includes(selectedDay.status);
+    selectedDay &&
+    !["past", "mine", "fixed", "pending", "swapped"].includes(selectedDay.status) &&
+    // No dia lotado com direito o caminho é o pedido da folga do mês (não folga extra).
+    !diaLotadoComDireito;
 
   const moverDia = (delta: number) => {
     if (!selectedDay) return;
@@ -1691,7 +1903,9 @@ export default function DpMeuCalendario() {
             ? "Carregando seu vínculo..."
             : convocavel
               ? "Marque os dias em que você não pode trabalhar."
-              : "Escolha suas folgas de fim de semana."
+              : portalLivre
+                ? "Escolha suas folgas de fim de semana."
+                : "Consulte suas folgas definidas pela administração."
         }
         actions={
           <Button
@@ -1719,16 +1933,25 @@ export default function DpMeuCalendario() {
                 </p>
                 {d.devolvido_motivo && <p className="text-xs text-muted-foreground">Recado: “{d.devolvido_motivo}”</p>}
               </div>
-              <Button size="sm" className="min-h-9" onClick={() => ajustarDevolvido(d)}>
-                Ajustar e reenviar
-              </Button>
+              {portalLivre && (
+                <Button size="sm" className="min-h-9" onClick={() => ajustarDevolvido(d)}>
+                  Ajustar e reenviar
+                </Button>
+              )}
             </div>
           ))}
         </div>
       )}
 
 
-      {!convocavel && vinculoCarregado && <div className="space-y-2">
+      {!convocavel && vinculoCarregado && !portalLivre && !janelaQuery.isPending && (
+        <div className="flex items-start gap-2 rounded-xl border bg-muted/40 px-3 py-2 text-sm">
+          <AlertCircle className="mt-0.5 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span>{TEXTO_ESCALA_ADMIN}</span>
+        </div>
+      )}
+
+      {!convocavel && vinculoCarregado && portalLivre && <div className="space-y-2">
         <p className="text-sm font-medium">Clique no dia desejado para visualizar, solicitar ou trocar folga.</p>
         {!/já está marcada|folga fixa/.test(resumoDomingos) && (
           <p className="text-xs text-muted-foreground">{resumoFolgas.texto}</p>
@@ -1790,6 +2013,9 @@ export default function DpMeuCalendario() {
           diasElegiveis={diasElegiveis}
           tetoMensal={tetoMensal}
           marcadoresPorDia={marcadoresQuery.data}
+          feriadosPorDia={feriadosPorDia}
+          mostrarPico
+          pagamentosPorDia={pagamentos.porData}
           variant="chunky"
           onPrev={goPrev}
           onNext={goNext}
@@ -1851,6 +2077,18 @@ export default function DpMeuCalendario() {
                 <Lock key="bloq" className="h-3.5 w-3.5 text-destructive" aria-label="Dia bloqueado" />,
               );
             }
+            const fer = feriadoDoDia(iso);
+            if (diaEhPico(iso, fer.feriado_nome)) {
+              icones.push(<Flame key="pico" className="h-3.5 w-3.5 fill-amber-500 text-amber-500" aria-label="Pico de operação" />);
+            }
+            if (fer.feriado_nome) {
+              icones.push(
+                <span key="fer" title={textoFeriadosDia(fer)} role="img" aria-label={textoFeriadosDia(fer)} className="text-[13px] leading-none">
+                  🎉
+                </span>,
+              );
+            }
+            for (const m of pagamentos.porData.get(iso) ?? []) chips.push(<PilulaPagamento key={`pag-${m.tipo}`} marco={m} />);
             if (!blocked && status === "available" && wknd) {
               chips.push(
                 <span key="disp" className="inline-flex items-center rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[11px] font-semibold text-emerald-600">
@@ -1861,7 +2099,7 @@ export default function DpMeuCalendario() {
             if (!blocked && status === "fixed") {
               chips.push(
                 <span key="sem" className="inline-flex items-center rounded-full border border-blue-500/30 bg-blue-500/10 px-2 py-0.5 text-[11px] font-semibold text-blue-600">
-                  Semanal
+                  {meu12x36 ? "Descanso" : "Semanal"}
                 </span>,
               );
             }
@@ -1929,15 +2167,23 @@ export default function DpMeuCalendario() {
             };
           })}
         />
-        <LegendaFolgas className="mt-2.5" />
+        <LegendaFolgas className="mt-2.5" marcos />
       </div>
 
       <p className="text-xs text-muted-foreground">
         Clique em um dia para ver detalhes, marcar folga de fim de semana, pedir troca ou solicitar exceção.
       </p>
+      {meuAdiantamento.data?.disponivel && (
+        <section aria-label="Adiantamento salarial" className="rounded-2xl border border-success/30 bg-success/5 p-3">
+          <p className="mb-2 flex items-center gap-1.5 text-sm font-semibold"><HandCoins className="h-4 w-4 text-success" aria-hidden /> Adiantamento salarial</p>
+          <AdiantamentoPortalAcao info={meuAdiantamento.data} compacto />
+        </section>
+      )}
       </>)}
 
 
+
+      <AvisoConvocacaoFeriado colaboradorId={meRef.data?.id} onSolicitarDispensa={(iso) => setSelectedDay({ iso, status: "weekday" })} />
 
       {/* Dialog do dia */}
       <Dialog open={!!selectedDay} onOpenChange={(o) => !o && setSelectedDay(null)}>
@@ -1947,12 +2193,45 @@ export default function DpMeuCalendario() {
             <DialogTitle className="text-2xl font-black flex items-center gap-3">
               <CalendarDays className="size-6 text-primary" />
               {selectedDay && formatBR(parseYMD(selectedDay.iso))}
+              {convocadoNoDia && <SeloConvocado />}
             </DialogTitle>
             <DialogDescription className="sr-only">Detalhes do dia selecionado</DialogDescription>
           </DialogHeader>
 
           {selectedDay && dayInfo && (
             <div className="space-y-4">
+              {(() => {
+                const fer = feriadoDoDia(selectedDay.iso);
+                const pico = diaEhPico(selectedDay.iso, fer.feriado_nome);
+                const pags = pagamentos.porData.get(selectedDay.iso) ?? [];
+                const adi = meuAdiantamento.data?.disponivel ? meuAdiantamento.data : null;
+                const diaDoAdiantamento = !!adi && (selectedDay.iso === adi.pagamento_atual || selectedDay.iso === adi.pagamento_pedido);
+                if (!fer.feriados.length && !pico && !pags.length && !diaDoAdiantamento) return null;
+                return (
+                  <section className="space-y-2" aria-label="Marcos do dia">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {fer.feriados.map((f) => (
+                        <span key={`${f.categoria}-${f.nome}`} className="inline-flex max-w-full items-center gap-1.5 rounded-full border border-primary/40 bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">
+                          <span aria-hidden="true">🎉</span>
+                          <span className="truncate">Feriado {FERIADO_CATEGORIA_LABEL[f.categoria]} · {f.nome}</span>
+                        </span>
+                      ))}
+                      {pico && (
+                        <span className="inline-flex items-center gap-1.5 rounded-full border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-semibold text-amber-700 dark:text-amber-400">
+                          <Flame className="h-3.5 w-3.5" /> Pico de operação
+                        </span>
+                      )}
+                    </div>
+                    <PagamentosDoDia marcos={pags} />
+                    {diaDoAdiantamento && adi && (
+                      <div className="rounded-xl border border-success/30 p-3">
+                        <p className="mb-2 text-xs font-semibold">Seu adiantamento salarial</p>
+                        <AdiantamentoPortalAcao info={adi} compacto />
+                      </div>
+                    )}
+                  </section>
+                );
+              })()}
               <section className="space-y-2">
                 <h2 className="font-semibold">Ocorrências do dia</h2>
                 {ocorrenciasPeriodo.isLoading ? <p role="status" className="text-sm">Carregando ocorrências…</p> : ocorrenciasPeriodo.isError ? <div role="alert"><p className="text-sm">Não foi possível consultar as ocorrências.</p><Button variant="outline" onClick={() => ocorrenciasPeriodo.refetch()}>Tentar novamente</Button></div> : <>
@@ -1964,7 +2243,7 @@ export default function DpMeuCalendario() {
               <div className="flex flex-wrap items-center justify-between gap-2 rounded-2xl border bg-muted/50 p-4 text-sm min-w-0">
                 <span className="font-bold">Status</span>
                 <Badge variant="outline" className={cn("text-xs whitespace-normal text-right break-words max-w-full", STATUS_BADGE[selectedDay.status])}>
-                  {STATUS_LABEL[selectedDay.status]}
+                  {rotuloStatus(selectedDay.status)}
                 </Badge>
               </div>
 
@@ -1973,11 +2252,11 @@ export default function DpMeuCalendario() {
                 minhaFolga={
                   ["mine", "fixed", "swapped"].includes(selectedDay.status)
                   || dayInfo.occupants.some((o) => o.colaboradorId === meRef.data?.id)
-                    ? STATUS_LABEL[selectedDay.status === "fixed" ? "fixed" : selectedDay.status === "swapped" ? "swapped" : "mine"]
+                    ? rotuloStatus(selectedDay.status === "fixed" ? "fixed" : selectedDay.status === "swapped" ? "swapped" : "mine")
                     : null
                 }
                 trocaveis={
-                  dayInfo.canTrade && !["blocked", "past", "mine", "fixed"].includes(selectedDay.status)
+                  trocaLivre && dayInfo.canTrade && !["blocked", "past", "mine", "fixed"].includes(selectedDay.status)
                     ? dayInfo.occupants
                         .filter((o) => o.colaboradorId !== meRef.data?.id
                           // Folga do colega coberta por atestado, licença, suspensão ou férias não é negociável.
@@ -1985,6 +2264,11 @@ export default function DpMeuCalendario() {
                         .map((o) => o.colaboradorId)
                     : []
                 }
+                colegasDeFolga={dayInfo.occupants
+                  .filter((o) => o.colaboradorId !== meRef.data?.id && o.type !== "pending"
+                    && !dataEmAfastamento(afastamentosQuery.data, o.colaboradorId, selectedDay.iso))
+                  .map((o) => ({ id: o.colaboradorId, nome: o.colaboradorNome || "Colega" }))}
+                trocasAbertas={trocasAbertasComColegas(trocasPendentesQuery.data as any[], meRef.data?.id, selectedDay.iso)}
                 onTrocar={(id, nome) =>
                   setTradeOpen({
                     occupantId: id,
@@ -1995,17 +2279,31 @@ export default function DpMeuCalendario() {
               />
 
               <div className="flex flex-col gap-2">
-                {selectedDay.status === "available" && dayInfo.isWeekend && (
+                {meRef.data?.id && (
+                  <PedirDispensaFeriado
+                    colaboradorId={meRef.data.id}
+                    unidadeId={meRef.data.unidade_id ?? null}
+                    iso={selectedDay.iso}
+                    diaDeTrabalho={!["past", "mine", "fixed", "pending", "swapped"].includes(selectedDay.status)}
+                    escala12x36={meu12x36}
+                  />
+                )}
+                {!portalLivre && selectedDay.status !== "past" && (
+                  <p className="rounded-xl border bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                    {TEXTO_ESCALA_ADMIN}
+                  </p>
+                )}
+                {portalLivre && selectedDay.status === "available" && dayInfo.isWeekend && (
                   <Button onClick={() => marcarFolga.mutate(selectedDay.iso)} disabled={marcarFolga.isPending}>
                     {marcarFolga.isPending ? "Marcando..." : "Marcar folga"}
                   </Button>
                 )}
-                {selectedDay.status === "available" && !dayInfo.isWeekend && (
+                {portalLivre && selectedDay.status === "available" && !dayInfo.isWeekend && (
                   <p className="text-xs text-muted-foreground">
                     Somente fins de semana podem ser marcados diretamente. Use "Solicitar exceção" para outros dias.
                   </p>
                 )}
-                {folgaParaMover && (
+                {portalLivre && folgaParaMover && (
                   <Button
                     variant="outline"
                     className="h-auto min-h-10 w-full whitespace-normal break-words px-3 py-2.5 text-center leading-snug"
@@ -2018,7 +2316,9 @@ export default function DpMeuCalendario() {
                       // "Teto do mês" conta a própria folga que está sendo movida:
                       // no mesmo mês, mover não aumenta o total, então segue direto.
                       const tetoPelaPropria =
-                        selectedDay.status === "taken" &&
+                        (selectedDay.status === "quota" &&
+                          folgaParaMover.data.slice(0, 7) === selectedDay.iso.slice(0, 7)) ||
+                        (selectedDay.status === "taken" &&
                         !(manualBlocked.get(selectedDay.iso) && !manualBlocked.get(selectedDay.iso)?.liberada) &&
                         !(() => {
                           const lim = dayLimits.get(selectedDay.iso);
@@ -2027,7 +2327,7 @@ export default function DpMeuCalendario() {
                           ).length;
                           return lim != null && oc >= lim;
                         })() &&
-                        folgaParaMover.data.slice(0, 7) === selectedDay.iso.slice(0, 7);
+                        folgaParaMover.data.slice(0, 7) === selectedDay.iso.slice(0, 7));
                       setRemarcarAviso(
                         !tetoPelaPropria && MOTIVO_STATUS[selectedDay.status]
                           ? `${MOTIVO_STATUS[selectedDay.status]}. Você pode trocar com um colega que folga neste dia ou pedir a mudança ao gestor.`
@@ -2036,7 +2336,7 @@ export default function DpMeuCalendario() {
                     }}
                   >
                     <CalendarClock className="mr-2 h-4 w-4 shrink-0" />
-                    Trocar minha folga de {diaSemanaBR(folgaParaMover.data)} {formatBR(parseYMD(folgaParaMover.data))} por
+                    Mudar minha folga de {diaSemanaBR(folgaParaMover.data)} {formatBR(parseYMD(folgaParaMover.data))} para
                     este dia
                   </Button>
                 )}
@@ -2045,7 +2345,7 @@ export default function DpMeuCalendario() {
                     Folga definida automaticamente porque você não escolheu no período de marcação.
                   </p>
                 )}
-                {selectedDay.status === "mine" && (
+                {portalLivre && selectedDay.status === "mine" && (
                   <Button
                     variant="outline"
                     onClick={() => {
@@ -2058,12 +2358,12 @@ export default function DpMeuCalendario() {
                     <CalendarClock className="mr-2 h-4 w-4" /> Mudar o dia da minha folga
                   </Button>
                 )}
-                {selectedDay.status === "mine" && janela.estado !== "aberta" && (
+                {portalLivre && selectedDay.status === "mine" && janela.estado !== "aberta" && (
                   <p className="text-xs text-muted-foreground">
                     O período de escolha já fechou: esta folga não pode mais ser removida, apenas trocada para outro dia.
                   </p>
                 )}
-                {selectedDay.status === "mine" && janela.estado === "aberta" && (
+                {portalLivre && selectedDay.status === "mine" && janela.estado === "aberta" && (
                   <ConfirmarAcaoDialog
                     titulo="Remover esta folga?"
                     descricao="O dia volta a ficar livre e pode ser escolhido por outra pessoa da equipe."
@@ -2078,7 +2378,7 @@ export default function DpMeuCalendario() {
                   </ConfirmarAcaoDialog>
                 )}
 
-                {selectedDay.status === "fixed" && (
+                {portalLivre && selectedDay.status === "fixed" && (
                   <p className="text-xs text-muted-foreground">
                     Esta é sua folga semanal fixa. Para trocá-la, toque no dia em que deseja folgar: use "Trocar" ao
                     lado de um colega que folga nesse dia ou "Solicitar exceção ao gestor".
@@ -2095,7 +2395,9 @@ export default function DpMeuCalendario() {
                       </p>
                     )}
                     <p className="text-xs text-muted-foreground">
-                      Data bloqueada pelo setor de pessoal. Você pode pedir uma exceção abaixo.
+                      {portalLivre
+                        ? "Data bloqueada pelo setor de pessoal. Você pode pedir uma exceção abaixo."
+                        : "Data bloqueada pelo setor de pessoal."}
                     </p>
                   </div>
                 )}
@@ -2103,8 +2405,65 @@ export default function DpMeuCalendario() {
                 {selectedDay.status === "taken" && (
                   <p className="text-xs text-muted-foreground">Limite de folgas atingido neste dia.</p>
                 )}
+                {portalLivre && diaLotadoComDireito && dayInfo.isWeekend && (
+                  <div className="flex flex-col gap-2 rounded-xl border border-warning/40 bg-warning/10 px-3 py-2">
+                    {pedidoLotadoDoMes ? (
+                      <p className="text-xs font-medium text-foreground">
+                        Você já pediu ao gestor a folga de {diaSemanaBR(pedidoLotadoDoMes.data_alvo)}{" "}
+                        {formatBR(parseYMD(pedidoLotadoDoMes.data_alvo))}. Aguarde a resposta ou cancele aquele pedido
+                        para pedir outro dia.
+                      </p>
+                    ) : (
+                      <>
+                        <p className="text-xs font-medium text-foreground">
+                          Este dia já atingiu o limite de pessoas de folga. Como você ainda não tem folga de fim de
+                          semana neste mês, peça ao gestor: a folga só vale depois que ele aprovar.
+                        </p>
+                        <ConfirmarAcaoDialog
+                          titulo="Pedir esta folga ao gestor?"
+                          descricao={`O dia ${formatBR(parseYMD(selectedDay.iso))} está lotado. O gestor avalia a escala e responde pelo portal. Enquanto isso, o dia segue como de trabalho.`}
+                          confirmar="Enviar pedido"
+                          cancelar="Voltar"
+                          onConfirm={() => pedirDiaLotado.mutate(selectedDay.iso)}
+                          disabled={pedirDiaLotado.isPending}
+                        >
+                          <Button className="min-h-10 w-full" disabled={pedirDiaLotado.isPending}>
+                            {pedirDiaLotado.isPending ? "Enviando..." : "Solicitar folga ao gestor"}
+                          </Button>
+                        </ConfirmarAcaoDialog>
+                      </>
+                    )}
+                  </div>
+                )}
+                {portalLivre && selectedDay.status === "quota" && (
+                  <p className="rounded-xl border border-sky-200 bg-sky-500/10 px-3 py-2 text-xs font-medium text-sky-700">
+                    {folgaParaMover
+                      ? `Este dia tem vaga. Você já marcou sua folga do mês em ${diaSemanaBR(folgaParaMover.data)} ${formatBR(parseYMD(folgaParaMover.data))}: toque no botão acima para mudar para este dia, sem precisar do gestor.`
+                      : "Este dia tem vaga, mas você já usou suas folgas deste mês."}
+                  </p>
+                )}
                 {(() => {
                   const dev = meusDevolvidos.data?.find((d) => d.data_alvo === selectedDay.iso);
+                  const meuPedido = meuPedidoPendenteNoDia(pendentes, meRef.data?.id, selectedDay.iso);
+                  const botaoCancelar = (id: string, rotulo: string) => (
+                    <ConfirmarAcaoDialog
+                      titulo="Cancelar este pedido?"
+                      descricao="O gestor deixa de ver o pedido e nada muda na sua folga. Se quiser, você pode fazer um novo pedido depois."
+                      confirmar="Cancelar pedido"
+                      cancelar="Manter pedido"
+                      onConfirm={() => cancelarPedido.mutate(id)}
+                      disabled={cancelarPedido.isPending}
+                    >
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="min-h-9 w-full sm:w-auto"
+                        disabled={cancelarPedido.isPending}
+                      >
+                        {cancelarPedido.isPending ? "Cancelando..." : rotulo}
+                      </Button>
+                    </ConfirmarAcaoDialog>
+                  );
                   if (dev) {
                     return (
                       <div className="rounded-md border border-warning/40 bg-warning/10 p-3 space-y-2">
@@ -2112,16 +2471,32 @@ export default function DpMeuCalendario() {
                         {dev.devolvido_motivo && (
                           <p className="text-xs text-muted-foreground">Recado: “{dev.devolvido_motivo}”</p>
                         )}
-                        <Button
-                          size="sm"
-                          className="min-h-9 w-full sm:w-auto"
-                          onClick={() => {
-                            setSelectedDay(null);
-                            ajustarDevolvido(dev);
-                          }}
-                        >
-                          Ajustar e reenviar
-                        </Button>
+                        {portalLivre && (
+                          <Button
+                            size="sm"
+                            className="min-h-9 w-full sm:w-auto"
+                            onClick={() => {
+                              setSelectedDay(null);
+                              ajustarDevolvido(dev);
+                            }}
+                          >
+                            Ajustar e reenviar
+                          </Button>
+                        )}
+                        {botaoCancelar(dev.id, "Desistir do pedido")}
+                      </div>
+                    );
+                  }
+                  if (meuPedido) {
+                    return (
+                      <div className="space-y-2 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                        <p className="text-sm font-medium">Seu pedido está com o gestor</p>
+                        <p className="text-xs text-muted-foreground">
+                          {ehMudancaDeFolga(meuPedido)
+                            ? `Você pediu para mudar sua folga de ${diaSemanaBR(meuPedido.data_fim!)} ${formatBR(parseYMD(meuPedido.data_fim!))} para este dia. Enquanto o gestor não responde, sua folga continua no dia original.`
+                            : "Você pediu folga neste dia. Enquanto o gestor não responde, o dia segue como de trabalho."}
+                        </p>
+                        {botaoCancelar(meuPedido.id, "Cancelar meu pedido")}
                       </div>
                     );
                   }
@@ -2138,7 +2513,7 @@ export default function DpMeuCalendario() {
                 {selectedDay.status === "past" && (
                   <p className="text-xs text-muted-foreground">Data já passou.</p>
                 )}
-                {selectedDay.status === "weekday" && (
+                {portalLivre && selectedDay.status === "weekday" && (
                   <p className="text-xs text-muted-foreground">
                     Dia de trabalho. Você pode pedir uma troca com um colega que está de folga neste dia ou
                     solicitar uma exceção ao DP.
@@ -2229,7 +2604,7 @@ export default function DpMeuCalendario() {
                 )}
 
 
-                {showExceptionBtn && (
+                {portalLivre && showExceptionBtn && (
                   <Button
                     variant="outline"
                     className="border-amber-200 text-amber-700 hover:bg-amber-50"
@@ -2332,7 +2707,7 @@ export default function DpMeuCalendario() {
             </div>
             {excecaoModo === "troca_semanal" && (
               <div>
-                <Label>Dia da folga semanal que você vai trabalhar</Label>
+                <Label>Folga atual · dia que passará a trabalhar</Label>
                 <Select value={excecaoDiaTrabalho} onValueChange={setExcecaoDiaTrabalho}>
                   <SelectTrigger className="rounded-xl">
                     <SelectValue placeholder="Escolha o dia" />
@@ -2350,8 +2725,8 @@ export default function DpMeuCalendario() {
                 )}
                 {excecaoDiaTrabalho && selectedDay && (
                   <p className="mt-2 rounded-xl border border-sky-200 bg-sky-500/10 px-3 py-2 text-xs font-medium text-sky-700">
-                    Você pede para trabalhar em {descreverDia(excecaoDiaTrabalho)} (sua folga semanal) e folgar em{" "}
-                    {descreverDia(selectedDay.iso)} no lugar dele.
+                    <span className="block">Folga atual: {descreverDia(excecaoDiaTrabalho)} · passará a trabalhar</span>
+                    <span className="block">Folga desejada: {descreverDia(selectedDay.iso)}</span>
                   </p>
                 )}
               </div>

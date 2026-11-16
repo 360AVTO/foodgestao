@@ -1,5 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { garantirColaboradorNovo } from "@/lib/billing/excedente-colaboradores";
+import { FranquiaColaboradoresAviso, useEstadoFranquia } from "@/components/billing/FranquiaColaboradoresAviso";
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useUpsertDpCargo, useUpsertDpCargoSalario } from "@/hooks/useDpCadastros";
@@ -14,7 +16,7 @@ import {
 } from "@/lib/dp/ficha-registro/inferencia";
 import { Link } from "react-router-dom";
 import {
-  AlertTriangle, Check, ChevronDown, ChevronUp, FileText, Loader2, Plus, UserCheck, UserCog, X,
+  AlertTriangle, Check, ChevronDown, ChevronUp, FileText, KeyRound, Loader2, Plus, Save, UserCheck, UserCog, X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
@@ -27,12 +29,18 @@ import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
 import { matchCargo } from "@/lib/dp/ficha-registro/cargo-match";
 import { matchTurno, type TurnoCadastrado } from "@/lib/dp/ficha-registro/turno-match";
+import {
+  dispensaPontoExigeMotivo, JUSTIFICATIVA_PONTO_MIN, semDadosAcesso, turnoPadraoDoLote, type AjusteFichaLote,
+} from "@/lib/dp/ficha-registro/organizacao-lote";
+import { MOTIVOS_DISPENSA_PONTO } from "@/components/dp/ficha-registro/lote/EscolhasLoteCampos";
 import { formatCnpj, matchUnidade } from "@/lib/dp/ficha-registro/unidade-match";
 import { CONFIANCA_LABEL, nivelDoCampo, trechoDoTexto, type NivelConfianca } from "@/lib/dp/ficha-registro/confianca";
 import { montarPayloadFicha } from "@/lib/dp/ficha-registro/payload";
 import { camposFaltando, resumoFaltando } from "@/lib/dp/cadastro-completude";
 import { useDpSalarioCargoResolver } from "@/hooks/useDpSalarioCargoResolver";
 import { CargoFormDialog } from "@/components/dp/cargos/CargoFormDialog";
+import { CargoBuscaSelect } from "./CargoBuscaSelect";
+import { ConfirmarIgnorarFichaDialog } from "./ConfirmarIgnorarFichaDialog";
 import { UnidadeFormDialog } from "@/components/dp/UnidadeFormDialog";
 import { SetorFormDialog } from "@/components/dp/setores/SetorFormDialog";
 import { TurnoForm } from "@/components/dp/TurnoForm";
@@ -40,11 +48,15 @@ import { TURNO_FORM_DEFAULT, useDpTurnos } from "@/hooks/useDpTurnos";
 import { FichaComparacaoDialog } from "./FichaComparacaoDialog";
 import { FichaHistoricoLido } from "./FichaHistoricoLido";
 import {
-  jornadaDaFicha, useAplicarFicha, useIgnorarFicha, type FichaItem,
+  jornadaDaFicha, useAplicarFicha, useIgnorarFicha, useReativarFicha, type FichaItem,
 } from "@/hooks/useDpFichaImportacao";
 import {
-  normalizeHora, type JornadaDia, type JornadaSugerida,
+  alertaCargaSemanal, aplicarIntervaloMinimo, formatarHoras, inconformidadesJornada, minutosEntre, normalizeHora,
+  problemasJornada, resumoInconformidades, resumoSemanal, rotuloFolgaSemanal,
+  type JornadaDia, type JornadaSugerida,
 } from "@/lib/dp/ficha-registro/jornada-parse";
+import { PENDENCIA_POR_INCONFORMIDADE } from "@/lib/dp/ficha-registro/organizacao-lote";
+import { JornadaConformidadeAlerta } from "./JornadaConformidadeAlerta";
 import { notifyError } from "@/lib/notifyError";
 import { mensagemOrigemApoio, vincularOrigemApoio } from "@/lib/dp/apoio-origem";
 import { EnderecoFields } from "@/components/shared/EnderecoFields";
@@ -109,6 +121,8 @@ interface Props {
   /** Setor e vínculo definidos na barra "aplicar a todas as fichas". */
   setorPadraoId?: string | null;
   regimePadrao?: string | null;
+  /** Adiantamento da maioria do lote (a escolha na ficha prevalece). */
+  adiantamentoPadrao?: boolean | null;
   /** Abre o cadastro completo do colaborador criado por esta ficha. */
   onAbrirCadastro?: (colaboradorId: string) => void;
   /**
@@ -125,17 +139,50 @@ interface Props {
   emFoco?: boolean;
   /** Chamado após cadastrar/atualizar com sucesso. */
   onConcluido?: (itemId: string, nome: string) => void;
+  /** Chamado depois de ignorar a ficha (a tela avança e oferece "Desfazer"). */
+  onIgnorado?: (itemId: string, nome: string) => void;
+  /** Mostra o aviso de franquia no cartão (a tela de lote mostra um único aviso no topo). */
+  avisoFranquia?: boolean;
+  /** Cargo e setor decididos na organização do lote (o gestor ainda pode trocar). */
+  vinculoLote?: { cargoId: string | null; setorId: string | null } | null;
+  /** Turno da maioria do lote: vale só para fichas sem horário reconhecido. */
+  turnoPadraoId?: string | null;
+  /** Mostra no topo o que ainda falta a pessoa definir (conferência do lote). */
+  destacarPendencias?: boolean;
+  /** Botões fixos no rodapé da janela, acima da área segura do celular. */
+  rodapeFixo?: boolean;
+  /**
+   * Base fixa da gaveta de conferência: quando informada, as ações (Ignorar,
+   * Salvar e próxima, Criar cadastro) são desenhadas nela, fora da rolagem.
+   */
+  rodapeContainer?: HTMLElement | null;
+  /** Rascunho salvo no lote para esta ficha (dados completados e escolhas). */
+  rascunho?: AjusteFichaLote | null;
+  /** Forma de pagamento escolhida para o lote/grupo (a escolha na ficha prevalece). */
+  formaPagamentoPadrao?: string | null;
+  /** Lote: salva o que foi preenchido sem criar o cadastro e segue para a próxima ficha. */
+  onSalvarRascunho?: (ajuste: AjusteFichaLote) => Promise<void>;
+  /** Lote: ponto decidido na ação em grupo (null = segue a unidade). */
+  folhaPontoPadrao?: boolean | null;
+  /** Lote: motivo da dispensa de ponto informado na ação em grupo. */
+  justificativaPontoPadrao?: string | null;
+  /** Lote: ciência única do intervalo de 30 a 59 min (justificativa registrada no lote). */
+  cienciaIntervaloLote?: string | null;
 }
 
 export function FichaRevisaoCard({
   item, cargos, unidades, setores = [], turnos = [], unidadePadraoId, empresaCnpj,
-  setorPadraoId = null, regimePadrao = null, onAbrirCadastro, preadmissaoId = null,
-  pessoaApoioId = null, posicao, total, emFoco = false, onConcluido,
+  setorPadraoId = null, regimePadrao = null, adiantamentoPadrao = null, onAbrirCadastro, preadmissaoId = null,
+  pessoaApoioId = null, posicao, total, emFoco = false, onConcluido, onIgnorado, avisoFranquia = true, vinculoLote = null,
+  turnoPadraoId = null, destacarPendencias = false, rodapeFixo = false, rodapeContainer = null,
+  rascunho = null, formaPagamentoPadrao = null, onSalvarRascunho,
+  folhaPontoPadrao = null, justificativaPontoPadrao = null, cienciaIntervaloLote = null,
 }: Props) {
+  const comRodape = (node: ReactNode) => (rodapeContainer ? createPortal(node, rodapeContainer) : node);
   const extraidos = (item.dados_extraidos ?? {}) as Record<string, unknown>;
   const confianca = (item.confianca_campos ?? {}) as Record<string, string>;
 
-  const [dados, setDados] = useState<Record<string, unknown>>(() => ({ ...extraidos }));
+  const [dados, setDados] = useState<Record<string, unknown>>(() => ({ ...extraidos, ...(rascunho?.dados ?? {}) }));
   const cargoSugerido = useMemo(
     () => matchCargo({ cargo_nome: (dados.cargo_nome as string) ?? null, cbo: (dados.cbo as string) ?? null }, cargos),
     [dados.cargo_nome, dados.cbo, cargos],
@@ -145,8 +192,11 @@ export function FichaRevisaoCard({
    * Só o nome parecido preenche sozinho. CBO igual com nome diferente (ex.:
    * CUMIM × GARÇONETE) fica como sugestão: o gestor confirma ou cria o cargo.
    */
+  const cargoDoLote =
+    vinculoLote?.cargoId && cargos.some((c) => c.id === vinculoLote.cargoId) ? vinculoLote.cargoId : null;
   const cargoAutomatico =
-    cargoSugerido.motivo === "cbo_e_nome" || cargoSugerido.motivo === "nome" ? cargoSugerido.cargo_id : null;
+    cargoDoLote ??
+    (cargoSugerido.motivo === "cbo_e_nome" || cargoSugerido.motivo === "nome" ? cargoSugerido.cargo_id : null);
   const [cargoId, setCargoIdState] = useState<string | null>(cargoAutomatico);
   const [cargoTocado, setCargoTocado] = useState(false);
   const setCargoId = (id: string | null) => {
@@ -162,18 +212,34 @@ export function FichaRevisaoCard({
   const [unidadeId, setUnidadeId] = useState<string | null>(
     unidadeSugerida.unidade_id ?? unidadePadraoId ?? unidades[0]?.id ?? null,
   );
-  const [setorEscolhido, setSetorEscolhido] = useState<string | null>(null);
-  const [regimeEscolhido, setRegimeEscolhido] = useState<string | null>(null);
-  const [regimeEscolhidoManual, setRegimeEscolhidoManual] = useState(false);
+  const [setorEscolhido, setSetorEscolhido] = useState<string | null>(vinculoLote?.setorId ?? null);
+  const [regimeEscolhido, setRegimeEscolhido] = useState<string | null>(rascunho?.regime ?? null);
+  const [regimeEscolhidoManual, setRegimeEscolhidoManual] = useState(!!rascunho?.regime);
   const setorId = setorEscolhido ?? setorPadraoId ?? null;
   const regime = regimeEscolhido ?? regimePadrao ?? null;
-  const [completarAberto, setCompletarAberto] = useState(false);
+  // Na conferência do lote nada fica escondido: o bloco já nasce aberto.
+  const [completarAberto, setCompletarAberto] = useState(destacarPendencias);
   const [usarJornada, setUsarJornada] = useState(true);
   const [atualizar, setAtualizar] = useState(!!item.colaborador_existente_id);
   const [anexarFicha, setAnexarFicha] = useState(true);
-  const [formaPagamento, setFormaPagamento] = useState<string | null>(null);
-  const [possuiFolhaPonto, setPossuiFolhaPonto] = useState<boolean | null>(null);
-  const [optanteAdiantamento, setOptanteAdiantamento] = useState<boolean | null>(null);
+  const [formaPagamento, setFormaPagamento] = useState<string | null>(
+    rascunho?.forma_pagamento ?? formaPagamentoPadrao ?? null,
+  );
+  // Escolha salva na ficha (rascunho) > ação em grupo do lote > unidade (efeito abaixo).
+  const [possuiFolhaPonto, setPossuiFolhaPontoState] = useState<boolean | null>(
+    typeof rascunho?.folha_ponto === "boolean" ? rascunho.folha_ponto : folhaPontoPadrao,
+  );
+  const [pontoTocado, setPontoTocado] = useState(false);
+  const setPossuiFolhaPonto = (v: boolean | null) => {
+    setPontoTocado(true);
+    setPossuiFolhaPontoState(v);
+  };
+  const [optanteEscolhido, setOptanteAdiantamento] = useState<boolean | null>(
+    typeof rascunho?.adiantamento === "boolean" ? rascunho.adiantamento : null,
+  );
+  const optanteAdiantamento = optanteEscolhido ?? adiantamentoPadrao ?? null;
+  // Assinatura dos documentos: celular (padrão) ou papel, escolhida na ficha ou em grupo no lote.
+  const [assinaturaPapel, setAssinaturaPapel] = useState<boolean>(rascunho?.assinatura_papel === true);
   const escolhasPendentes = escolhasObrigatoriasFaltando({
     regime,
     formaPagamento,
@@ -188,13 +254,27 @@ export function FichaRevisaoCard({
 
   const [verTexto, setVerTexto] = useState(false);
   const [cargoDialog, setCargoDialog] = useState(false);
+  const [cargoNovoNome, setCargoNovoNome] = useState("");
+  const [cargoCriado, setCargoCriado] = useState<{ id: string; nome: string } | null>(null);
+  const abrirCadastroCargo = (nome: string) => {
+    setCargoNovoNome(nome.trim().toUpperCase());
+    setCargoDialog(true);
+  };
   const [unidadeDialog, setUnidadeDialog] = useState(false);
   const [setorDialog, setSetorDialog] = useState(false);
   const [comparacao, setComparacao] = useState(false);
   const [confirmouEmpresa, setConfirmouEmpresa] = useState(false);
-  const [whatsappEditado, setWhatsappEditado] = useState(false);
+  const [whatsappEditado, setWhatsappEditado] = useState(
+    !!rascunho?.dados && "whatsapp" in rascunho.dados && rascunho.dados.whatsapp !== rascunho.dados.telefone,
+  );
+  const [salvandoRascunho, setSalvandoRascunho] = useState(false);
   const empresaDivergente = unidadeSugerida.empresaConfere === "nao";
   const bloqueadoPorEmpresa = empresaDivergente && !confirmouEmpresa;
+  // Franquia: avisa antes de preencher; quem não pode autorizar o excedente não conclui.
+  const criaColaboradorNovo = !(atualizar && !!item.colaborador_existente_id)
+    && !["criado", "atualizado", "ignorado"].includes(item.status);
+  const estadoFranquia = useEstadoFranquia(criaColaboradorNovo ? item.company_id : null);
+  const bloqueadoPorFranquia = estadoFranquia?.tipo === "bloqueado";
 
   const setoresDaUnidade = useMemo(
     () => (unidadeId ? setores.filter((s) => !s.unidade_id || s.unidade_id === unidadeId) : setores),
@@ -222,8 +302,9 @@ export function FichaRevisaoCard({
   const [editandoJornada, setEditandoJornada] = useState(false);
   const jornada = jornadaEditada ?? jornadaLida;
   const turnoSugerido = useMemo(() => matchTurno(jornada, turnos, unidadeId), [jornada, turnos, unidadeId]);
-  const [turnoId, setTurnoId] = useState<string | null>(null);
-  const turnoEscolhido = turnoId ?? turnoSugerido.turno_id;
+  const [turnoId, setTurnoId] = useState<string | null>(rascunho?.turno_id ?? null);
+  const turnoDoLote = turnoPadraoDoLote(jornada.vazia, turnoPadraoId, turnos);
+  const turnoEscolhido = turnoId ?? turnoSugerido.turno_id ?? turnoDoLote;
   const [turnoDialog, setTurnoDialog] = useState(false);
   const { criar: criarTurno } = useDpTurnos();
 
@@ -298,12 +379,54 @@ export function FichaRevisaoCard({
   const justificativaUnidade = pontoConformidade.data?.find((u) => u.id === unidadeId)?.justificativa ?? null;
   const unidadeIrregularPonto =
     !!unidadeId && !unidadeTemPonto && lotacaoComEste > LIMITE_PONTO_OBRIGATORIO && !justificativaValida(justificativaUnidade);
-  const [justificativaPonto, setJustificativaPonto] = useState("");
+  const [justificativaPonto, setJustificativaPontoState] = useState(
+    rascunho?.folha_ponto_justificativa ?? justificativaPontoPadrao ?? "",
+  );
+  const setJustificativaPonto = (v: string) => {
+    setPontoTocado(true);
+    setJustificativaPontoState(v);
+  };
+  // No lote, quem não foi marcado registra ponto quando a unidade tem relógio.
+  const pontoPadraoUnidade = pontoObrigatorio || !!onSalvarRascunho;
   useEffect(() => {
     if (!unidadeId) return;
-    if (!unidadeTemPonto) setPossuiFolhaPonto(false);
-    else if (possuiFolhaPonto === null && pontoObrigatorio) setPossuiFolhaPonto(true);
-  }, [unidadeId, unidadeTemPonto, pontoObrigatorio, possuiFolhaPonto]);
+    if (!unidadeTemPonto) setPossuiFolhaPontoState(false);
+    else if (possuiFolhaPonto === null && pontoPadraoUnidade) setPossuiFolhaPontoState(true);
+  }, [unidadeId, unidadeTemPonto, pontoPadraoUnidade, possuiFolhaPonto]);
+  /**
+   * Dispensa de ponto em unidade com relógio precisa de motivo quando a lei obriga
+   * (mais de 20 pessoas) ou quando o banco religaria o ponto do vínculo de emprego.
+   */
+  const exigeMotivoPonto =
+    unidadeTemPonto && possuiFolhaPonto === false && (pontoObrigatorio || (!preadmissaoId && dispensaPontoExigeMotivo(regime)));
+  /** Horário com intervalo ilegível/impossível: sinalizado para corrigir, nunca enviado às cegas. */
+  const problemasHorario = usarJornada ? problemasJornada(jornada) : [];
+  /** Carga semanal e descanso: recalculados a cada ajuste do horário. */
+  const semana = useMemo(() => resumoSemanal(jornada), [jornada]);
+  const alertaCarga = usarJornada ? alertaCargaSemanal(jornada) : null;
+  /**
+   * Jornada fora da CLT (carga, intervalo, descanso): corrigir ou registrar a
+   * ciência com justificativa. Horário ilegível vem antes (problemasHorario).
+   */
+  const [folgaNaEscala, setFolgaNaEscala] = useState(false);
+  const [justJornada, setJustJornada] = useState("");
+  const [cienteJornada, setCienteJornada] = useState(false);
+  const [tentouJornada, setTentouJornada] = useState(false);
+  const inconformidades = usarJornada && problemasHorario.length === 0
+    ? inconformidadesJornada(jornada, { intervaloReduzidoAceito: !!cienciaIntervaloLote })
+      .filter((i) => !(folgaNaEscala && i.codigo === "descanso_semanal"))
+    : [];
+  /** Intervalo de 30–59 min coberto pela ciência do lote: registrado também nesta pessoa. */
+  const intervaloReduzidoPeloLote = usarJornada && !!cienciaIntervaloLote
+    && inconformidadesJornada(jornada).some((i) => i.codigo === "intervalo_reduzido");
+  const cienciaJornadaOk = inconformidades.length === 0 || cienciaDivergenciaValida(justJornada, cienteJornada);
+  const plantaoLongo = usarJornada && jornada.dias.some((d) => d.trabalha && d.entrada && d.saida && minutosEntre(d.entrada, d.saida) >= 11 * 60);
+  const podeCompletarIntervalo = (() => {
+    if (!usarJornada || !inconformidades.some((i) => i.codigo === "intervalo" || i.codigo === "intervalo_reduzido")) return false;
+    const base = jornadaEditada ?? jornadaEditavel(jornadaLida);
+    return JSON.stringify(aplicarIntervaloMinimo(base).dias) !== JSON.stringify(base.dias);
+  })();
+  const faltaMotivoPonto = exigeMotivoPonto && justificativaPonto.trim().length < JUSTIFICATIVA_PONTO_MIN;
 
   const salarioFicha = useMemo(() => salarioDaFicha(dados), [dados]);
   // Na pré-admissão valem os familiares que o próprio candidato informou.
@@ -339,6 +462,8 @@ export function FichaRevisaoCard({
       const primeiro = dias.find((d) => d.trabalha && d.entrada && d.saida) ?? null;
       return {
         ...base,
+        // Quem digitou o intervalo conferiu: a dúvida da leitura do PDF deixa de valer.
+        intervalo_incerto: "intervalo_minutos" in patch ? false : base.intervalo_incerto,
         dias,
         entrada: primeiro?.entrada ?? null,
         saida: primeiro?.saida ?? null,
@@ -352,6 +477,7 @@ export function FichaRevisaoCard({
 
   const aplicar = useAplicarFicha();
   const ignorar = useIgnorarFicha();
+  const reativar = useReativarFicha();
 
   const aplicado = item.status === "criado" || item.status === "atualizado";
   const ignorado = item.status === "ignorado";
@@ -466,16 +592,33 @@ export function FichaRevisaoCard({
       toast.error("Escolha a unidade antes de aprovar. Se ela ainda não existe, use \"Cadastrar Unidade da Ficha\".");
       return;
     }
+    if (problemasHorario.length > 0) {
+      setJornadaEditada((j) => j ?? jornadaEditavel(jornadaLida));
+      setEditandoJornada(true);
+      toast.error("Confira o horário de trabalho: informe o intervalo em minutos de cada dia antes de criar o cadastro.");
+      document.getElementById(`ficha-horario-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+      return;
+    }
     if (escolhasPendentes.length > 0) {
       setCompletarAberto(true);
       setTentouCriar(true);
       toast.error(mensagemEscolhasObrigatorias(escolhasPendentes));
       return;
     }
-    if (pontoObrigatorio && possuiFolhaPonto === false && justificativaPonto.trim().length < 10) {
+    if (faltaMotivoPonto) {
       setCompletarAberto(true);
       setTentouCriar(true);
-      toast.error("A unidade tem mais de 20 pessoas: o ponto é obrigatório (Art. 74 da CLT). Justifique a dispensa (ex.: cargo de confiança, Art. 62).");
+      toast.error(
+        pontoObrigatorio
+          ? "A unidade tem mais de 20 pessoas: o ponto é obrigatório (Art. 74 da CLT). Informe o motivo da dispensa (ex.: cargo de confiança, Art. 62)."
+          : "Informe o motivo de não registrar ponto (ex.: cargo de confiança, Art. 62 da CLT). Sem ele o sistema volta a ligar o ponto.",
+      );
+      return;
+    }
+    if (!cienciaJornadaOk) {
+      setTentouJornada(true);
+      toast.error("Horário fora da CLT: corrija o horário ou registre a ciência com o motivo.");
+      document.getElementById(`ficha-clt-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
       return;
     }
     if (divergenciasRegistro.length > 0 && !cienciaDivergenciaValida(justDivergencia, cienteDivergencia)) {
@@ -542,7 +685,7 @@ export function FichaRevisaoCard({
       return;
     }
     const dadosBase = preadmissaoId ? dadosParaCadastro(stagingDados, dados, escolhas) : dados;
-    const dadosEnvio = pontoObrigatorio && possuiFolhaPonto === false
+    const dadosEnvio = unidadeTemPonto && possuiFolhaPonto === false && justificativaPonto.trim()
       ? { ...dadosBase, folha_ponto_dispensa_justificativa: justificativaPonto.trim() }
       : dadosBase;
     if (!(atualizar && !!item.colaborador_existente_id)) {
@@ -569,10 +712,14 @@ export function FichaRevisaoCard({
         formaPagamento: decidido?.formaPagamento ?? formaPagamento,
         possuiFolhaPonto,
         optanteAdiantamento,
+        assinaturaPapel,
         preadmissaoId,
       },
       {
         onSuccess: async (res) => {
+          if ((res as { assinatura?: string } | undefined)?.assinatura === "falhou") {
+            toast.warning('Cadastro criado, mas não deu para marcar "assina em papel". Marque em "Assinatura de documentos", na ficha do colaborador.');
+          }
           setComparacao(false);
           // Familiares da ficha viram dependentes (filhos, enteados, tutelados, cônjuge).
           const colabId = (res as { colaboradorId?: string } | undefined)?.colaboradorId;
@@ -591,6 +738,35 @@ export function FichaRevisaoCard({
                 ciencia: true,
               });
             } catch { /* o cadastro não falha pelo registro de ciência */ }
+          }
+          if (colabId && !res?.jaAplicado && (inconformidades.length > 0 || intervaloReduzidoPeloLote || folgaNaEscala)) {
+            const motivos = [
+              inconformidades.length > 0 ? justJornada.trim() : null,
+              intervaloReduzidoPeloLote ? `Ciência do lote (intervalo de 30 min): ${cienciaIntervaloLote}` : null,
+              folgaNaEscala ? "Ficha listava os 7 dias: 1 folga por semana definida na escala." : null,
+            ].filter(Boolean);
+            try {
+              await registrarCienciaRegra({
+                companyId: item.company_id,
+                tabela: "dp_colaboradores",
+                registroId: colabId,
+                valorAntigo: {
+                  origem: "ficha_registro",
+                  ficha_item_id: item.id,
+                  horario_ficha: typeof dados.jornada_texto === "string" ? dados.jornada_texto : null,
+                },
+                valorNovo: {
+                  tipo: "jornada_fora_clt",
+                  inconformidades: resumoInconformidades(inconformidades),
+                  intervalo_reduzido_ciencia_lote: intervaloReduzidoPeloLote,
+                  folga_definida_na_escala: folgaNaEscala,
+                },
+                justificativa: motivos.join(" | "),
+                ciencia: true,
+              });
+            } catch {
+              toast.warning("Cadastro criado, mas a ciência do horário não foi registrada. Avise o suporte Aveto.");
+            }
           }
           if (colabId && importarDependentes && dependentesLidos.length > 0 && !res?.jaAplicado) {
             const { data: existentes } = await supabase
@@ -638,6 +814,28 @@ export function FichaRevisaoCard({
     );
   };
 
+  /** O que foi completado ou escolhido nesta ficha, para continuar depois (não cria cadastro). */
+  const montarRascunho = (): AjusteFichaLote => {
+    const alterados: Record<string, unknown> = {};
+    for (const k of Object.keys(dados)) {
+      if (JSON.stringify(dados[k] ?? null) !== JSON.stringify(extraidos[k] ?? null)) alterados[k] = dados[k];
+    }
+    const aj: AjusteFichaLote = { dados: alterados };
+    if (regimeEscolhido) aj.regime = regimeEscolhido;
+    if (formaPagamento) aj.forma_pagamento = formaPagamento;
+    if (optanteEscolhido !== null) aj.adiantamento = optanteEscolhido;
+    // Ponto: guarda a decisão desta ficha (ou a que veio do rascunho) para não se perder.
+    if (possuiFolhaPonto !== null && (pontoTocado || typeof rascunho?.folha_ponto === "boolean")) {
+      aj.folha_ponto = possuiFolhaPonto;
+      aj.folha_ponto_justificativa = possuiFolhaPonto === false ? justificativaPonto.trim() || null : null;
+    }
+    if (assinaturaPapel || typeof rascunho?.assinatura_papel === "boolean") aj.assinatura_papel = assinaturaPapel;
+    if (turnoId) aj.turno_id = turnoId;
+    if (cargoTocado) aj.cargo_id = cargoId;
+    if (setorEscolhido && setorEscolhido !== (vinculoLote?.setorId ?? null)) aj.setor_id = setorEscolhido;
+    return aj;
+  };
+
   const set = (campo: string, valor: string) =>
     setDados((d) => {
       // O WhatsApp acompanha o telefone até alguém digitar um número diferente.
@@ -651,6 +849,29 @@ export function FichaRevisaoCard({
   const textoEndereco = (parte: string) =>
     typeof endereco[parte] === "string" ? String(endereco[parte]) : "";
 
+
+  /** Salário/cargo vindos da última alteração da ficha, com o da admissão para conferência. */
+  const notaVigencia = (tipo: "salario" | "cargo") => {
+    const vigencia = dados[`${tipo}_vigencia`];
+    if (typeof vigencia !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(vigencia)) return null;
+    const [a, m, d] = vigencia.split("-");
+    const admissao = dados[`${tipo}_admissao`];
+    const admissaoTxt =
+      tipo === "salario"
+        ? typeof admissao === "number" || typeof admissao === "string"
+          ? `R$ ${Number(admissao).toLocaleString("pt-BR", { minimumFractionDigits: 2 })}`
+          : null
+        : typeof admissao === "string" && admissao.trim() ? admissao : null;
+    return (
+      <p className="text-[11px] leading-snug text-muted-foreground">
+        <Badge variant="outline" className="mr-1 h-4 border-primary/40 px-1 text-[10px] font-normal text-primary">
+          Última alteração
+        </Badge>
+        vigente desde {d}/{m}/{a}
+        {admissaoTxt ? ` · na admissão: ${admissaoTxt}` : ""}
+      </p>
+    );
+  };
 
   const campo = (label: string, nome: string, tipo: "text" | "date" = "text") => {
     const valor = dados[nome];
@@ -696,10 +917,26 @@ export function FichaRevisaoCard({
 
   if (ignorado) {
     return (
-      <Card className="opacity-60">
+      <Card className="border-dashed">
         <CardContent className="flex items-center justify-between gap-3 p-4">
-          <span className="text-sm">{item.nome_extraido ?? "Ficha sem nome"}</span>
-          <Badge variant="outline">Ignorada</Badge>
+          <div className="min-w-0 space-y-1">
+            <span className="block truncate text-sm text-muted-foreground">{item.nome_extraido ?? "Ficha sem nome"}</span>
+            <Badge variant="outline">Ignorada</Badge>
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-10 shrink-0"
+            disabled={reativar.isPending}
+            onClick={() =>
+              reativar.mutate(item.id, {
+                onSuccess: () => toast.success("Ficha reativada: ela volta para a lista do lote."),
+                onError: (e: Error) => notifyError(e, { surface: "Pessoas 360°", action: "reativar a ficha" }),
+              })
+            }
+          >
+            Reativar ficha
+          </Button>
         </CardContent>
       </Card>
     );
@@ -742,14 +979,92 @@ export function FichaRevisaoCard({
           ) : null}
         </div>
 
+        {!aplicado && (avisoFranquia || bloqueadoPorFranquia) && <FranquiaColaboradoresAviso estado={estadoFranquia} />}
+
+        {!aplicado && !ignorado && destacarPendencias && (() => {
+          const pend: Array<{ rotulo: string; alvo: string; abrir?: boolean }> = [];
+          if (!cargoId) pend.push({ rotulo: "cargo", alvo: `ficha-cargo-${item.id}` });
+          for (const r of escolhasPendentes) pend.push({ rotulo: r, alvo: `ficha-completar-${item.id}`, abrir: true });
+          if (usarJornada && !turnoEscolhido && jornada.vazia) pend.push({ rotulo: "horário", alvo: `ficha-turno-${item.id}` });
+          if (!cienciaJornadaOk) {
+            for (const i of inconformidades) pend.push({ rotulo: PENDENCIA_POR_INCONFORMIDADE[i.codigo], alvo: `ficha-clt-${item.id}` });
+          }
+          const ir = (p: (typeof pend)[number]) => {
+            if (p.abrir) setCompletarAberto(true);
+            window.setTimeout(
+              () => document.getElementById(p.alvo)?.scrollIntoView({ behavior: "smooth", block: "center" }),
+              60,
+            );
+          };
+          const naoVeio = faltando.map((c) => c.label);
+          const blocoAcesso = semDadosAcesso(dados) && (
+            <div className="flex flex-wrap items-center gap-2 rounded-md border border-warning/40 bg-background/60 p-2 text-xs">
+              <KeyRound className="h-4 w-4 shrink-0 text-warning" aria-hidden="true" />
+              <span className="min-w-0 flex-1">
+                <span className="font-medium">Faltam dados de acesso:</span> sem telefone/WhatsApp e sem e-mail. O cadastro
+                pode ser criado, mas a pessoa só acessa o portal depois de preencher.
+              </span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-8 bg-background"
+                onClick={() => document.getElementById(`ficha-telefone-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" })}
+              >
+                Preencher
+              </Button>
+            </div>
+          );
+          const blocoNaoVeio = naoVeio.length > 0 && (
+            <p className="text-xs text-muted-foreground">
+              <span className="font-medium text-foreground">Não veio na ficha:</span> {naoVeio.join(", ")}.
+              {" "}Não impede o cadastro — dá para completar abaixo ou depois.
+            </p>
+          );
+          return pend.length === 0 ? (
+            <div className="space-y-2 rounded-lg border border-success/40 bg-success/10 p-3 text-sm">
+              <div className="flex items-center gap-2">
+                <Check className="h-4 w-4 shrink-0 text-success" />
+                <span>Tudo o que é obrigatório está definido. Confira os dados lidos e crie o cadastro.</span>
+              </div>
+              {blocoAcesso}
+              {blocoNaoVeio}
+            </div>
+          ) : (
+            <div className="space-y-2 rounded-lg border border-warning/50 bg-warning/10 p-3">
+              <p className="text-sm font-semibold">O que falta você definir</p>
+              <div className="flex flex-wrap gap-2">
+                {pend.map((p) => (
+                  <Button
+                    key={p.rotulo}
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-9 rounded-full bg-background capitalize"
+                    onClick={() => ir(p)}
+                  >
+                    {p.rotulo}
+                  </Button>
+                ))}
+              </div>
+              <p className="text-xs text-muted-foreground">Toque para ir direto ao campo.</p>
+              {blocoAcesso}
+              {blocoNaoVeio}
+            </div>
+          );
+        })()}
+
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {campo("Nome", "nome")}
           {campo("CPF", "cpf")}
           {campo("Matrícula", "matricula")}
           {campo("Nascimento", "data_nascimento", "date")}
           {campo("Admissão", "data_admissao", "date")}
-          {campo("Salário", "salario")}
-          {campo("Telefone", "telefone")}
+          <div className="space-y-1">
+            {campo("Salário", "salario")}
+            {notaVigencia("salario")}
+          </div>
+          <div id={`ficha-telefone-${item.id}`} className="scroll-mt-24">{campo("Telefone", "telefone")}</div>
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2">
               <Label className="text-xs">WhatsApp</Label>
@@ -774,23 +1089,27 @@ export function FichaRevisaoCard({
           {campo("RG", "rg_numero")}
           {campo("CTPS", "ctps_numero")}
           {campo("PIS", "pis_nit")}
-          {campo("Cargo na ficha", "cargo_nome")}
+          <div className="space-y-1">
+            {campo("Cargo na ficha", "cargo_nome")}
+            {notaVigencia("cargo")}
+          </div>
         </div>
 
         {!aplicado && (
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1" id={`ficha-cargo-${item.id}`}>
               <Label className="text-xs">Cargo cadastrado *</Label>
-              <Select value={cargoId ?? undefined} onValueChange={(v) => setCargoId(v)}>
-                <SelectTrigger className={cn("h-9", realce(!cargoId))}>
-                  <SelectValue placeholder="Escolha o cargo" />
-                </SelectTrigger>
-                <SelectContent>
-                  {cargos.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.nome}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CargoBuscaSelect
+                cargos={cargos}
+                value={cargoId}
+                onChange={setCargoId}
+                nomeLido={(dados.cargo_nome as string) ?? null}
+                cboLido={dados.cbo ? String(dados.cbo) : null}
+                sugestaoId={cargoPorCbo?.id ?? null}
+                rotuloReserva={cargoId && cargoCriado?.id === cargoId ? cargoCriado.nome : null}
+                onCriar={abrirCadastroCargo}
+                classeRealce={realce(!cargoId)}
+              />
               {cargoId && cargoAutomatico === cargoId && (
                 <p className="text-[11px] text-muted-foreground">Preenchido pelo cargo da ficha.</p>
               )}
@@ -803,7 +1122,7 @@ export function FichaRevisaoCard({
                     <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => setCargoId(cargoPorCbo.id)}>
                       Usar {cargoPorCbo.nome}
                     </Button>
-                    <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => setCargoDialog(true)}>
+                    <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => abrirCadastroCargo(String(dados.cargo_nome ?? ""))}>
                       <Plus className="mr-1 h-3 w-3" /> Criar “{String(dados.cargo_nome)}”
                     </Button>
                   </div>
@@ -818,7 +1137,7 @@ export function FichaRevisaoCard({
                         : `Nenhum cargo cadastrado corresponde a “${String(dados.cargo_nome)}”.`
                       : "Escolha o cargo ou cadastre um novo."}
                   </p>
-                  <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => setCargoDialog(true)}>
+                  <Button variant="outline" size="sm" className="h-7 text-[11px]" onClick={() => abrirCadastroCargo(String(dados.cargo_nome ?? ""))}>
                     <Plus className="mr-1 h-3 w-3" /> Criar este cargo
                   </Button>
                 </div>
@@ -831,15 +1150,6 @@ export function FichaRevisaoCard({
                     {patronalUnidade ? ` na convenção ${patronalUnidade.nome}` : " nesta unidade"} quando ainda não houver salário cadastrado.
                   </span>
                 </label>
-              )}
-              {cargoId && (
-                <button
-                  type="button"
-                  className="text-[11px] text-muted-foreground underline underline-offset-2"
-                  onClick={() => setCargoDialog(true)}
-                >
-                  Cadastrar outro cargo
-                </button>
               )}
             </div>
 
@@ -896,7 +1206,7 @@ export function FichaRevisaoCard({
         )}
 
         {!aplicado && (
-          <div className="rounded-lg border bg-muted/20">
+          <div className="scroll-mt-20 rounded-lg border bg-muted/20" id={`ficha-completar-${item.id}`}>
             <button
               type="button"
               className="flex w-full items-center justify-between gap-3 p-3 text-left"
@@ -1002,16 +1312,34 @@ export function FichaRevisaoCard({
                     {pontoObrigatorio && possuiFolhaPonto !== false && (
                       <p className="text-[11px] text-muted-foreground">Obrigatório: a unidade tem mais de 20 pessoas (Art. 74 da CLT).</p>
                     )}
-                    {pontoObrigatorio && possuiFolhaPonto === false && (
-                      <div className="space-y-1 rounded-md bg-amber-500/10 p-2">
+                    {exigeMotivoPonto && (
+                      <div className="space-y-1.5 rounded-md bg-amber-500/10 p-2">
                         <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                          A unidade tem mais de 20 pessoas e o ponto é obrigatório por lei. Só dispense em exceção legal (ex.: cargo de confiança, Art. 62 da CLT).
+                          {pontoObrigatorio
+                            ? "A unidade tem mais de 20 pessoas e o ponto é obrigatório por lei. Só dispense em exceção legal:"
+                            : "Só fica sem ponto quem se enquadra numa exceção legal. Informe o motivo:"}
                         </p>
+                        <div className="flex flex-wrap gap-1.5">
+                          {MOTIVOS_DISPENSA_PONTO.map((m) => (
+                            <button
+                              key={m}
+                              type="button"
+                              onClick={() => setJustificativaPonto(m)}
+                              className={cn(
+                                "min-h-8 rounded-full border px-2.5 text-[11px]",
+                                justificativaPonto === m ? "border-primary bg-primary/10 text-primary" : "bg-background",
+                              )}
+                            >
+                              {m}
+                            </button>
+                          ))}
+                        </div>
                         <Input
                           value={justificativaPonto}
                           onChange={(e) => setJustificativaPonto(e.target.value)}
-                          placeholder="Justificativa da dispensa *"
-                          className={cn("h-8 text-xs", realce(justificativaPonto.trim().length < 10))}
+                          placeholder="Motivo da dispensa *"
+                          maxLength={500}
+                          className={cn("h-9 text-xs", realce(faltaMotivoPonto))}
                         />
                       </div>
                     )}
@@ -1059,9 +1387,34 @@ export function FichaRevisaoCard({
                         <SelectItem value="false">Não optante</SelectItem>
                       </SelectContent>
                     </Select>
+                    {optanteEscolhido === null && adiantamentoPadrao !== null && (
+                      <p className="text-[11px] text-muted-foreground">
+                        {adiantamentoPadrao === false && onSalvarRascunho
+                          ? "Entra como não optante. Dá para mudar depois no cadastro."
+                          : "Preenchido pelo adiantamento da maioria do lote."}
+                      </p>
+                    )}
                     {tentouCriar && optanteAdiantamento === null && (
                       <p className="text-[11px] text-destructive">Informe se recebe adiantamento.</p>
                     )}
+                  </div>
+
+                  <div className="space-y-1">
+                    <Label className="text-xs">Assinatura de documentos</Label>
+                    <Select value={assinaturaPapel ? "papel" : "celular"} onValueChange={(v) => setAssinaturaPapel(v === "papel")}>
+                      <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="celular">Celular (portal)</SelectItem>
+                        <SelectItem value="papel">Papel (via impressa)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <p className="text-[11px] text-muted-foreground">
+                      {assinaturaPapel
+                        ? "Vale desde a admissão: os documentos não vão para o celular; imprima, colha a assinatura e anexe a via assinada."
+                        : !String(dados.whatsapp ?? dados.telefone ?? dados.email ?? "").trim()
+                          ? "Sem WhatsApp ou e-mail. Se a pessoa não tem celular, escolha Papel."
+                          : "Assina pelo portal, no celular."}
+                    </p>
                   </div>
 
 
@@ -1118,7 +1471,7 @@ export function FichaRevisaoCard({
 
 
         {(!jornada.vazia || !aplicado) && (
-          <div className="rounded-lg border bg-muted/30 p-3">
+          <div id={`ficha-horario-${item.id}`} className="scroll-mt-20 rounded-lg border bg-muted/30 p-3">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <p className="text-sm font-medium">
                 {jornadaEditada ? "Horário ajustado nesta conferência" : "Horário da ficha"}
@@ -1144,6 +1497,19 @@ export function FichaRevisaoCard({
                 </div>
               )}
             </div>
+            {semana && usarJornada && (
+              <p className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-xs">
+                <span>
+                  <span className="text-muted-foreground">Carga semanal:</span>{" "}
+                  <strong className={cn(alertaCarga && "text-warning-foreground")}>{formatarHoras(semana.minutos)}</strong>
+                  <span className="text-muted-foreground"> em {semana.diasTrabalho} {semana.diasTrabalho === 1 ? "dia" : "dias"}</span>
+                </span>
+                <span>
+                  <span className="text-muted-foreground">Folga semanal:</span>{" "}
+                  <strong>{rotuloFolgaSemanal(semana)}</strong>
+                </span>
+              </p>
+            )}
             {jornada.vazia ? (
               <p className="mt-2 text-[11px] text-muted-foreground">
                 Nenhum horário foi lido nesta ficha. Você pode informar os horários à mão.
@@ -1219,6 +1585,39 @@ export function FichaRevisaoCard({
             {jornada.vira_meia_noite && (
               <p className="mt-2 text-[11px] text-muted-foreground">A saída acontece no dia seguinte.</p>
             )}
+            {!aplicado && problemasHorario.length > 0 && (
+              <div role="alert" className="mt-2 rounded-md border border-warning/40 bg-warning/10 p-2 text-[11px] leading-relaxed text-warning-foreground">
+                <strong>Revisar horário.</strong> {problemasHorario.join(" ")}
+                {typeof dados.jornada_texto === "string" && dados.jornada_texto ? ` A ficha diz: "${dados.jornada_texto}".` : ""}
+                {" "}Toque em "Editar horários" e informe o intervalo em minutos.
+              </div>
+            )}
+            {!aplicado && (
+              <JornadaConformidadeAlerta
+                id={`ficha-clt-${item.id}`}
+                inconformidades={inconformidades}
+                justificativa={justJornada}
+                onJustificativa={setJustJornada}
+                ciente={cienteJornada}
+                onCiente={setCienteJornada}
+                mostrarErro={tentouJornada}
+                plantaoLongo={plantaoLongo && inconformidades.some((i) => i.codigo === "carga_semanal")}
+                onIntervaloMinimo={podeCompletarIntervalo
+                  ? () => {
+                      setJornadaEditada((j) => aplicarIntervaloMinimo(j ?? jornadaEditavel(jornadaLida)));
+                      setUsarJornada(true);
+                      toast.success("Intervalo mínimo aplicado. Confira a carga semanal.");
+                    }
+                  : null}
+                onFolgaNaEscala={() => setFolgaNaEscala(true)}
+              />
+            )}
+            {!aplicado && folgaNaEscala && (
+              <p className="mt-2 text-[11px] text-muted-foreground">
+                Folga semanal: 1 por semana, definida na escala.{" "}
+                <button type="button" className="underline" onClick={() => setFolgaNaEscala(false)}>Desfazer</button>
+              </p>
+            )}
             {jornadaEditada && !jornadaLida.vazia && (
               <div className="mt-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-[11px] leading-relaxed text-amber-800 dark:text-amber-300">
                 <strong>Horário Diferente da Ficha.</strong> A ficha registra
@@ -1228,7 +1627,7 @@ export function FichaRevisaoCard({
             )}
 
             {!aplicado && usarJornada && (
-              <div className="mt-3 space-y-1">
+              <div className="mt-3 scroll-mt-20 space-y-1" id={`ficha-turno-${item.id}`}>
                 <div className="flex items-center justify-between gap-2">
                   <Label className="text-xs">Turno correspondente</Label>
                   <Button type="button" variant="ghost" size="sm" className="h-7 text-[11px]" onClick={() => setTurnoDialog(true)}>
@@ -1307,7 +1706,7 @@ export function FichaRevisaoCard({
           </pre>
         )}
 
-        {!aplicado && faltando.length > 0 && (() => {
+        {!aplicado && !destacarPendencias && faltando.length > 0 && (() => {
           const obrig = faltando.filter((c) => c.obrigatorio);
           const opc = faltando.filter((c) => !c.obrigatorio);
           return (
@@ -1422,17 +1821,42 @@ export function FichaRevisaoCard({
           />
         )}
 
-        {!aplicado && (
+        {!aplicado && comRodape(
 
-          <div className="flex flex-wrap justify-end gap-2">
-            <Button
-              variant="ghost"
-              size="sm"
+          <div
+            className={cn(
+              "flex flex-wrap justify-end gap-2",
+              rodapeFixo && !rodapeContainer &&
+                "sticky bottom-0 z-10 -mx-4 -mb-4 rounded-b-lg border-t bg-card px-4 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))]",
+            )}
+          >
+            {!cienciaJornadaOk && (
+              <button
+                type="button"
+                className="w-full rounded-md border border-warning/50 bg-warning/10 px-3 py-2 text-left text-xs"
+                onClick={() => {
+                  setTentouJornada(true);
+                  document.getElementById(`ficha-clt-${item.id}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}
+              >
+                <strong>Horário fora da CLT.</strong> Corrija o horário ou registre a ciência para criar o cadastro.
+              </button>
+            )}
+            <ConfirmarIgnorarFichaDialog
+              nome={String(dados.nome ?? item.nome_extraido ?? "esta pessoa")}
+              emLote={destacarPendencias}
               disabled={ignorar.isPending}
-              onClick={() => ignorar.mutate(item, { onError: (e: Error) => notifyError(e, { surface: "Pessoas 360°", action: "concluir a ação" }) })}
+              onConfirm={() =>
+                ignorar.mutate(item, {
+                  onSuccess: () => onIgnorado?.(item.id, String(dados.nome ?? item.nome_extraido ?? "Ficha sem nome")),
+                  onError: (e: Error) => notifyError(e, { surface: "Pessoas 360°", action: "ignorar a ficha" }),
+                })
+              }
             >
-              <X className="mr-1 h-4 w-4" /> Ignorar
-            </Button>
+              <Button variant="ghost" size="sm" disabled={ignorar.isPending}>
+                {ignorar.isPending ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <X className="mr-1 h-4 w-4" />} Ignorar
+              </Button>
+            </ConfirmarIgnorarFichaDialog>
             {preadmissaoId && (
               <Button
                 variant="outline"
@@ -1447,11 +1871,32 @@ export function FichaRevisaoCard({
                 Somente anexar a ficha
               </Button>
             )}
+            {onSalvarRascunho && (
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={salvandoRascunho || aplicar.isPending}
+                title="Guarda o que foi preenchido nesta ficha sem criar o cadastro"
+                onClick={async () => {
+                  setSalvandoRascunho(true);
+                  try {
+                    await onSalvarRascunho(montarRascunho());
+                  } catch (e) {
+                    toast.error((e as Error).message);
+                  } finally {
+                    setSalvandoRascunho(false);
+                  }
+                }}
+              >
+                {salvandoRascunho ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Save className="mr-1 h-4 w-4" />}
+                Salvar e próxima
+              </Button>
+            )}
             <Button
               size="sm"
               disabled={
-                aplicar.isPending || preparando ||
-                bloqueadoPorEmpresa ||
+                aplicar.isPending || preparando || !cienciaJornadaOk ||
+                bloqueadoPorEmpresa || bloqueadoPorFranquia ||
                 (!preadmissaoId && !!item.colaborador_existente_id && !atualizar) ||
                 (!!preadmissaoId && (!stagingDados || faltaDecidir > 0))
               }
@@ -1487,10 +1932,17 @@ export function FichaRevisaoCard({
             onOpenChange={setCargoDialog}
             cargo={null}
             inicial={{
-              nome: String(dados.cargo_nome ?? "").toUpperCase(),
-              cbo: String((dados.cbo as string) ?? ""),
+              nome: cargoNovoNome || String(dados.cargo_nome ?? "").toUpperCase(),
+              // O CBO lido só acompanha o nome lido; nome digitado na busca começa sem CBO.
+              cbo:
+                !cargoNovoNome || cargoNovoNome === String(dados.cargo_nome ?? "").trim().toUpperCase()
+                  ? String((dados.cbo as string) ?? "")
+                  : "",
             }}
-            onSaved={(c) => setCargoId(c.id)}
+            onSaved={(c) => {
+              setCargoCriado({ id: c.id, nome: c.nome });
+              setCargoId(c.id);
+            }}
           />
         )}
 

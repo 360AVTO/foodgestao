@@ -3,33 +3,36 @@ import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { notifyError } from "@/lib/notifyError";
 
-export function useAdminSubscriptions() {
+export type EscopoAssinaturas = "contratantes" | "sem_contratacao" | "teste";
+
+export function useAdminSubscriptions(escopo: EscopoAssinaturas = "contratantes", enabled = true) {
   return useQuery({
-    queryKey: ["admin-subscriptions"],
+    queryKey: ["admin-subscriptions", escopo],
+    enabled,
     queryFn: async () => {
-      const { data, error } = await supabase
-        .from("subscriptions")
-        .select("*, plan:plans(name, slug, price_cents, billing_period), company:companies(id, name, trade_name, cnpj), addons:subscription_addons(id, quantity, status, price_cents, is_exempt, prorata_cents, prorata_billed_at)")
-        .order("created_at", { ascending: false });
+      const { data, error } = await supabase.rpc("admin_assinaturas_lista" as any, { p_escopo: escopo });
       if (error) throw error;
-      return data;
+      return (data ?? []) as any[];
     },
   });
 }
 
-export function useAdminInvoices(filters?: { status?: string; userId?: string }) {
+export type EscopoFaturas = "reais" | "teste" | "todas";
+
+export function useAdminInvoices(filters?: { status?: string; userId?: string; escopo?: EscopoFaturas }) {
+  const escopo = filters?.escopo ?? "reais";
   return useQuery({
-    queryKey: ["admin-invoices", filters],
+    queryKey: ["admin-invoices", escopo, filters?.status ?? null, filters?.userId ?? null],
     queryFn: async () => {
-      let q = supabase
-        .from("invoices")
-        .select("*, subscription:subscriptions(plan:plans(name, slug))")
-        .order("created_at", { ascending: false });
-      if (filters?.status) q = q.eq("status", filters.status as any);
-      if (filters?.userId) q = q.eq("user_id", filters.userId);
-      const { data, error } = await q;
+      const { data, error } = await supabase.rpc("admin_faturas_lista" as any, { p_escopo: escopo });
       if (error) throw error;
-      return data;
+      let rows = ((data ?? []) as any[]).map((inv) => ({
+        ...inv,
+        subscription: inv.plan_name || inv.plan_slug ? { plan: { name: inv.plan_name, slug: inv.plan_slug } } : null,
+      }));
+      if (filters?.status) rows = rows.filter((r) => r.status === filters.status);
+      if (filters?.userId) rows = rows.filter((r) => r.user_id === filters.userId);
+      return rows;
     },
   });
 }
