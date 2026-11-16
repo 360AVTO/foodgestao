@@ -2,6 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2'
 import { corsHeaders } from 'npm:@supabase/supabase-js@2/cors'
 import { sendTemplateEmail } from '../_shared/transactional-email-templates/send-email.ts'
 import { normalizeBRPhone, sendZapiText } from '../_shared/zapi.ts'
+import { waEmail } from '../_shared/company-invite-accept.ts'
 
 const TEMPLATE_NAME = 'company-invite'
 const APP_URL = 'https://aveto360.com'
@@ -109,12 +110,23 @@ Deno.serve(async (req) => {
   const inviterName = profile?.full_name ?? 'Um administrador'
   const inviteUrl = `${APP_URL}/convite/${invite.token}`
 
+  // Quem já tem conta não cria senha: só confirma a inclusão da empresa.
+  const loginEmail = recipient ?? waEmail(String(invite.whatsapp ?? ''))
+  const { data: existente } = await supabase.rpc('resolve_login_identifier', { _identifier: loginEmail })
+  const contaExiste = Array.isArray(existente) && existente.length > 0
+  const loginHint = recipient
+    ? recipient
+    : `WhatsApp com final ${String(invite.whatsapp ?? '').slice(-4)}`
+
   let whatsappOk = false
   const phone = normalizeBRPhone(invite.whatsapp)
   if (phone) {
     const primeiroNome = String(invite.full_name ?? '').split(' ')[0] ?? ''
     const nomeFmt = primeiroNome ? primeiroNome.charAt(0) + primeiroNome.slice(1).toLowerCase() : ''
-    const msg = `Olá${nomeFmt ? `, ${nomeFmt}` : ''}! ${inviterName} convidou você para acessar ${companyName} no Aveto 360.\n\nCrie sua senha pelo link (válido por 7 dias):\n${inviteUrl}`
+    const ola = `Olá${nomeFmt ? `, ${nomeFmt}` : ''}!`
+    const msg = contaExiste
+      ? `${ola} ${inviterName} liberou seu acesso a ${companyName} no Aveto 360.\n\nVocê já tem conta (login: ${loginHint}). Toque no link e entre com a sua senha atual para confirmar (válido por 7 dias):\n${inviteUrl}\n\nNão reconhece esta conta? Avise quem enviou o convite.`
+      : `${ola} ${inviterName} convidou você para acessar ${companyName} no Aveto 360.\n\nCrie sua senha pelo link (válido por 7 dias):\n${inviteUrl}`
     const r = await sendZapiText(phone, msg)
     whatsappOk = r.ok
     if (r.ok) {
@@ -129,7 +141,7 @@ Deno.serve(async (req) => {
     try {
       const result = await sendTemplateEmail(TEMPLATE_NAME, recipient, {
         idempotencyKey: `company-invite-${invite.id}`,
-        templateData: { companyName, inviterName, role: invite.role, inviteUrl },
+        templateData: { companyName, inviterName, role: invite.role, inviteUrl, contaExiste, loginHint },
       })
       if (!result.sent) {
         await logSend(supabase, recipient, 'suppressed')

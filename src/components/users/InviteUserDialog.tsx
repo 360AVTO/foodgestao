@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -14,6 +14,14 @@ import { useAdminCompanies } from "@/hooks/useAdminCompanies";
 import { CompanyRole, ModulosMap, PERFIS, PerfilKey, PermissionsMap, getPerfil, perfilPadraoDoRole } from "@/lib/permissions";
 import { isValidPhone, maskPhone } from "@/lib/phone";
 import { garantirLimite } from "@/lib/billing/limites";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
+import { AlertTriangle, Info, Loader2, XCircle } from "lucide-react";
+import {
+  avisoIdentidadeConvite,
+  mensagemWhatsappConvite,
+  motivoRecusaConvite,
+  type ConferenciaIdentidade,
+} from "@/lib/convites-identidade";
 
 interface InviteUserDialogProps {
   open: boolean;
@@ -23,9 +31,20 @@ interface InviteUserDialogProps {
   onSuccess: () => void;
 }
 
-export function whatsappInviteLink(phoneDigits: string, nome: string, link: string) {
-  const msg = `Olá, ${nome.split(" ")[0] ?? ""}! Você foi convidado para acessar o Aveto 360. Crie sua senha pelo link: ${link}`;
+export function whatsappInviteLink(phoneDigits: string, nome: string, link: string, contaExiste = false) {
+  const msg = mensagemWhatsappConvite(nome, link, contaExiste);
   return `https://wa.me/55${phoneDigits}?text=${encodeURIComponent(msg)}`;
+}
+
+async function conferirIdentidade(empresas: string[], email: string, whatsapp: string, nome: string) {
+  const { data, error } = await (supabase as any).rpc("company_invite_conferir_identidade", {
+    p_company_ids: empresas,
+    p_email: email.trim().toLowerCase() || null,
+    p_whatsapp: whatsapp,
+    p_nome: nome.trim(),
+  });
+  if (error) throw error;
+  return data as ConferenciaIdentidade;
 }
 
 export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, onSuccess }: InviteUserDialogProps) {
@@ -42,6 +61,9 @@ export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, o
   const [contas, setContas] = useState<EscopoPorEmpresa>({});
   const [unidades, setUnidades] = useState<EscopoPorEmpresa>({});
   const [saving, setSaving] = useState(false);
+  const [conferencia, setConferencia] = useState<ConferenciaIdentidade | null>(null);
+  const [conferindo, setConferindo] = useState(false);
+  const seqConferencia = useRef(0);
 
   const { data: adminCompanies = [] } = useAdminCompanies(open);
   const acessoTotal = preset.role === "owner" || preset.role === "admin";
@@ -65,7 +87,7 @@ export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, o
   };
 
   const reset = () => {
-    setNome(""); setWhatsapp(""); setEmail("");
+    setNome(""); setWhatsapp(""); setEmail(""); setConferencia(null);
     applyPerfil("personalizado");
   };
 
@@ -74,11 +96,49 @@ export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, o
   const contasOk = acessoTotal || !empresaComListaVazia(empresas, contas);
   const unidadesOk = acessoTotal || !empresaComListaVazia(empresas, unidades);
   const valid = nome.trim().length >= 3 && isValidPhone(whatsapp) && emailOk && empresas.length > 0 && contasOk && unidadesOk;
+  const emailConferido = emailOk ? email.trim().toLowerCase() : "";
+  const podeConferir = open && empresas.length > 0 && (isValidPhone(whatsapp) || !!emailConferido);
+
+  // Confere, enquanto o gestor digita, se o e-mail/WhatsApp já tem dono no sistema.
+  useEffect(() => {
+    if (!podeConferir) { setConferencia(null); setConferindo(false); return; }
+    const seq = ++seqConferencia.current;
+    setConferindo(true);
+    const t = window.setTimeout(async () => {
+      try {
+        const r = await conferirIdentidade(empresas, emailConferido, waDigits, nome);
+        if (seq === seqConferencia.current) setConferencia(r);
+      } catch {
+        if (seq === seqConferencia.current) setConferencia(null);
+      } finally {
+        if (seq === seqConferencia.current) setConferindo(false);
+      }
+    }, 500);
+    return () => window.clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [podeConferir, emailConferido, waDigits, nome, empresas.join(",")]);
+
+  const aviso = avisoIdentidadeConvite(conferencia, nome);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!user || !valid) return;
     setSaving(true);
+    // Confere de novo na hora do envio (sem depender da última digitação).
+    let confFinal: ConferenciaIdentidade | null = null;
+    try {
+      confFinal = await conferirIdentidade(empresas, emailConferido, waDigits, nome);
+      setConferencia(confFinal);
+    } catch {
+      confFinal = null;
+    }
+    const avisoFinal = avisoIdentidadeConvite(confFinal, nome);
+    if (avisoFinal?.bloqueia) {
+      toast.error(avisoFinal.titulo, { description: avisoFinal.texto });
+      setSaving(false);
+      return;
+    }
+    const contaExiste = confFinal?.situacao === "conta_existente";
     try {
       await garantirLimite(
         companyId,
@@ -114,14 +174,16 @@ export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, o
       .select("token, id, company_id");
 
     if (error || !data?.length) {
-      toast.error("Erro ao criar convite", { description: error?.message });
+      const motivo = motivoRecusaConvite(error?.message);
+      if (motivo) toast.error("Convite não enviado", { description: motivo });
+      else toast.error("Erro ao criar convite", { description: error?.message });
       setSaving(false);
       return;
     }
 
     const principal = data.find((d: any) => d.company_id === companyId) ?? data[0];
     const link = `${window.location.origin}/convite/${principal.token}`;
-    const waLink = whatsappInviteLink(waDigits, nome.trim(), link);
+    const waLink = whatsappInviteLink(waDigits, nome.trim(), link, contaExiste);
 
     supabase.functions
       .invoke("send-company-invite", { body: { inviteId: principal.id } })
@@ -142,7 +204,9 @@ export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, o
       });
 
     toast.success("Convite criado!", {
-      description: "Enviamos o link por WhatsApp" + (email.trim() ? " e e-mail." : "."),
+      description: contaExiste
+        ? "Enviamos o link para incluir a empresa na conta que a pessoa já usa."
+        : "Enviamos o link por WhatsApp" + (email.trim() ? " e e-mail." : "."),
       action: { label: "Copiar link", onClick: () => navigator.clipboard.writeText(link) },
       duration: 10000,
     });
@@ -174,8 +238,23 @@ export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, o
               </div>
               <div className="space-y-1.5">
                 <Label htmlFor="inv-email">E-mail (opcional)</Label>
-                <Input id="inv-email" className="min-h-11" type="email" inputMode="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="usuario@exemplo.com" />
+                <Input id="inv-email" className="min-h-11" type="email" inputMode="email" autoCapitalize="none" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="usuario@exemplo.com" aria-describedby={aviso ? "inv-identidade" : undefined} />
               </div>
+              {(aviso || conferindo) && (
+                <div className="sm:col-span-2" id="inv-identidade" aria-live="polite">
+                  {aviso ? (
+                    <Alert variant={aviso.tom === "erro" ? "destructive" : "default"} className={aviso.tom === "alerta" ? "border-warning/50" : undefined}>
+                      {aviso.tom === "erro" ? <XCircle className="h-4 w-4" /> : aviso.tom === "alerta" ? <AlertTriangle className="h-4 w-4 text-warning" /> : <Info className="h-4 w-4" />}
+                      <AlertTitle className="text-sm">{aviso.titulo}</AlertTitle>
+                      <AlertDescription className="text-xs leading-relaxed">{aviso.texto}</AlertDescription>
+                    </Alert>
+                  ) : (
+                    <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
+                      <Loader2 className="h-3 w-3 animate-spin" /> Conferindo se já existe cadastro…
+                    </p>
+                  )}
+                </div>
+              )}
               <div className="space-y-1.5 sm:col-span-2">
                 <Label>Tipo de perfil *</Label>
                 <Select value={perfil} onValueChange={(v) => applyPerfil(v as PerfilKey)}>
@@ -224,7 +303,7 @@ export function InviteUserDialog({ open, onOpenChange, companyId, defaultRole, o
           </div>
           <DialogFooter className="shrink-0 flex-row gap-2 border-t bg-background px-4 py-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] sm:px-6">
             <Button type="button" variant="outline" className="flex-1 min-h-11 sm:flex-none" onClick={() => onOpenChange(false)}>Cancelar</Button>
-            <Button type="submit" className="flex-1 min-h-11 sm:flex-none" disabled={saving || !valid}>{saving ? "Enviando..." : "Enviar convite"}</Button>
+            <Button type="submit" className="flex-1 min-h-11 sm:flex-none" disabled={saving || !valid || !!aviso?.bloqueia}>{saving ? "Enviando..." : "Enviar convite"}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

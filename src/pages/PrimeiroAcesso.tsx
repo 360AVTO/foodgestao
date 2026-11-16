@@ -2,17 +2,14 @@ import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Lock, Eye, EyeOff, ArrowLeft } from "lucide-react";
+import { ArrowLeft } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
 import { z } from "zod";
 import { avaliarSenha, mensagemDoServidorDeContas } from "@/lib/security/passwordPolicy";
-import { MedidorSenha } from "@/components/auth/MedidorSenha";
-import { ChecklistRequisitosSenha } from "@/components/auth/ChecklistRequisitosSenha";
-import { ConferenciaSenhas } from "@/components/auth/ConferenciaSenhas";
+import { BlocoNovaSenha, focarCampoSenha } from "@/components/auth/BlocoNovaSenha";
+import { motivoSenhaPendente } from "@/lib/security/novaSenha";
 
 /** Regra única de senha nova (S3): src/lib/security/passwordPolicy.ts */
 const schema = z.object({
@@ -32,7 +29,7 @@ export default function PrimeiroAcesso() {
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
-  const [showPwd, setShowPwd] = useState(false);
+  const [tentou, setTentou] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const navigate = useNavigate();
 
@@ -63,6 +60,7 @@ export default function PrimeiroAcesso() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+    if (motivoSenhaPendente(password, confirm)) { setTentou(true); focarCampoSenha(); return; }
     const parsed = schema.safeParse({ password, confirm });
     if (!parsed.success) {
       const fe: Record<string, string> = {};
@@ -115,50 +113,16 @@ export default function PrimeiroAcesso() {
         </CardHeader>
         <form onSubmit={handleSubmit}>
           <CardContent className="space-y-4">
-            <div className="space-y-2">
-              <Label htmlFor="password">Nova senha</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="password"
-                  type={showPwd ? "text" : "password"}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="pl-10 pr-10"
-                  maxLength={72}
-                  autoComplete="new-password"
-                />
-                <button
-                  type="button"
-                  onClick={() => setShowPwd((v) => !v)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                  aria-label={showPwd ? "Ocultar senha" : "Mostrar senha"}
-                  tabIndex={-1}
-                >
-                  {showPwd ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                </button>
-              </div>
-              <MedidorSenha senha={password} semMensagem />
-              {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
-              <ChecklistRequisitosSenha senha={password} />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="confirm">Confirmar nova senha</Label>
-              <div className="relative">
-                <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="confirm"
-                  type={showPwd ? "text" : "password"}
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  className="pl-10"
-                  maxLength={72}
-                  autoComplete="new-password"
-                />
-              </div>
-              {errors.confirm ? <p className="text-xs text-destructive">{errors.confirm}</p> : <ConferenciaSenhas senha={password} confirmacao={confirm} />}
-            </div>
-            <Button type="submit" className="w-full min-h-11" disabled={submitting || !avaliarSenha(password).valida || password !== confirm}>
+            <BlocoNovaSenha
+              senha={password}
+              confirma={confirm}
+              onSenhaChange={(v) => { setPassword(v); setErrors({}); }}
+              onConfirmaChange={setConfirm}
+              erroSenha={errors.password}
+              erroConfirma={errors.confirm}
+              tentouEnviar={tentou}
+            />
+            <Button type="submit" className="w-full min-h-11" disabled={submitting}>
               {submitting ? "Salvando..." : "Salvar Nova Senha"}
             </Button>
           </CardContent>

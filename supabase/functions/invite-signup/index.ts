@@ -67,6 +67,10 @@ Deno.serve(async (req) => {
           ? String(invite.invited_email).replace(/^(.{2}).*(@.*)$/, "$1***$2")
           : `(**) *****-${String(invite.whatsapp ?? "").slice(-4)}`,
         conta_existe: contaExiste,
+        // Conta exata a que o convite foi vinculado (quem tem o link precisa reconhecê-la).
+        login_exibicao: invite.invited_email
+          ? String(invite.invited_email).toLowerCase()
+          : `WhatsApp com final ${String(invite.whatsapp ?? "").slice(-4)}`,
       });
     }
 

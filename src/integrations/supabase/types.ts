@@ -19245,6 +19245,16 @@ export type Database = {
           subscription_id: string
         }[]
       }
+      company_invite_conferir_identidade: {
+        Args: {
+          p_company_ids: string[]
+          p_email: string
+          p_nome: string
+          p_whatsapp: string
+        }
+        Returns: Json
+      }
+      company_invite_renovar: { Args: { _invite_id: string }; Returns: Json }
       concierge_ativar: {
         Args: { p_grupo_id: string; p_user_id: string }
         Returns: undefined

@@ -1702,6 +1702,27 @@
       "when": 1794771503452,
       "tag": "0242_assinatura_desligado_no_prazo",
       "breakpoints": true
+    },
+    {
+      "idx": 243,
+      "version": "7",
+      "when": 1794842682395,
+      "tag": "0243_company_invite_renovar",
+      "breakpoints": true
+    },
+    {
+      "idx": 244,
+      "version": "7",
+      "when": 1794844887891,
+      "tag": "0244_remover_sql_dinamico_remuneracao_e_lote",
+      "breakpoints": true
+    },
+    {
+      "idx": 245,
+      "version": "7",
+      "when": 1794847125310,
+      "tag": "0245_convite_conferencia_identidade",
+      "breakpoints": true
     }
   ]
 }

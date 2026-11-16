@@ -10,7 +10,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
-import { ChecklistRequisitosSenha } from "@/components/auth/ChecklistRequisitosSenha";
+import { BlocoNovaSenha, focarCampoSenha } from "@/components/auth/BlocoNovaSenha";
+import { motivoSenhaPendente } from "@/lib/security/novaSenha";
 import { useTurnstileConfig } from "@/hooks/useTurnstileSiteKey";
 import { maskCpf } from "@/lib/cpf";
 import { chamarAuthCandidato, destinoSeguro } from "@/lib/recrutamento/candidato";
@@ -42,9 +43,11 @@ export default function CandidatoAcesso() {
   const [aceite, setAceite] = useState(false);
   const [desafio, setDesafio] = useState<string | null>(null);
   const [codigo, setCodigo] = useState("");
+  const [confirma, setConfirma] = useState("");
+  const [tentouSenha, setTentouSenha] = useState(false);
 
   const trocarModo = (m: string) => {
-    setModo(m as Modo); setErro(null); setAviso(null); setDesafio(null); setCodigo(""); setSenha("");
+    setModo(m as Modo); setErro(null); setAviso(null); setDesafio(null); setCodigo(""); setSenha(""); setConfirma(""); setTentouSenha(false);
   };
   const renovarCaptcha = () => { setToken(""); setWidgetKey((k) => k + 1); };
 
@@ -111,6 +114,7 @@ export default function CandidatoAcesso() {
       <Input id="nasc" type="date" value={nascimento} onChange={(e) => setNascimento(e.target.value)} />
     </div>
   );
+  const dadosSenha = { nome, cpf: soDigitos(cpf) };
   const etapaCodigo = (onConfirmar: () => void, rotulo: string) => (
     <div className="space-y-4">
       <div className="space-y-1.5">
@@ -118,12 +122,24 @@ export default function CandidatoAcesso() {
         <Input id="codigo" inputMode="numeric" autoComplete="one-time-code" maxLength={6} value={codigo}
           onChange={(e) => setCodigo(soDigitos(e.target.value).slice(0, 6))} placeholder="000000" />
       </div>
-      <div className="space-y-1.5">
-        <Label htmlFor="nova">Crie sua senha</Label>
-        <Input id="nova" type="password" autoComplete="new-password" value={senha} onChange={(e) => setSenha(e.target.value)} />
-        <ChecklistRequisitosSenha senha={senha} dados={{ nome, cpf: soDigitos(cpf) }} />
-      </div>
-      <Button className="w-full h-11" disabled={carregando || codigo.length !== 6 || !senha} onClick={onConfirmar}>
+      <BlocoNovaSenha
+        senha={senha}
+        confirma={confirma}
+        onSenhaChange={setSenha}
+        onConfirmaChange={setConfirma}
+        dados={dadosSenha}
+        rotuloSenha="Crie sua senha"
+        rotuloConfirma="Confirme a senha"
+        tentouEnviar={tentouSenha}
+      />
+      <Button
+        className="w-full h-11"
+        disabled={carregando || codigo.length !== 6}
+        onClick={() => {
+          if (motivoSenhaPendente(senha, confirma, dadosSenha)) { setTentouSenha(true); focarCampoSenha(); return; }
+          onConfirmar();
+        }}
+      >
         {carregando && <Loader2 className="h-4 w-4 animate-spin" />} {rotulo}
       </Button>
       <Button variant="ghost" className="w-full" onClick={() => { setDesafio(null); setCodigo(""); setAviso(null); renovarCaptcha(); }}>
