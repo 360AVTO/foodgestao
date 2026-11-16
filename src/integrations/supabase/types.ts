@@ -19245,6 +19245,7 @@ export type Database = {
           subscription_id: string
         }[]
       }
+      company_invite_renovar: { Args: { _invite_id: string }; Returns: Json }
       concierge_ativar: {
         Args: { p_grupo_id: string; p_user_id: string }
         Returns: undefined

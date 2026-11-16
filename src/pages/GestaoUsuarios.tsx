@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { useLocation, useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
@@ -11,12 +11,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { toast } from "sonner";
-import { Users, UserPlus, Crown, Shield, User, Eye, Trash2, Clock, Copy, XCircle, Settings2, Calculator, Send } from "lucide-react";
+import { Users, UserPlus, Crown, Shield, User, Eye, Trash2, Clock, Copy, XCircle, Settings2, Calculator, Send, RefreshCw } from "lucide-react";
 import { formatDate } from "@/lib/date-utils";
 import { InviteUserDialog } from "@/components/users/InviteUserDialog";
 import { EditMemberPermissionsDialog, EditableMember } from "@/components/users/EditMemberPermissionsDialog";
 import { CompanyRole, PERFIL_LABELS, PerfilKey, MODULOS, MODULOS_TODOS } from "@/lib/permissions";
 import { maskPhone } from "@/lib/phone";
+import { acoesConvite, mensagemErroRenovar, situacaoConvite, STATUS_EXCLUIVEIS } from "@/lib/convites";
 
 const roleBadge = (role: string) => {
   switch (role) {
@@ -53,7 +54,9 @@ const contatoConvite = (i: any) => {
     .join(" · ");
 };
 
-const statusBadge = (status: string) => {
+const statusBadge = (invite: any) => {
+  const situacao = situacaoConvite(invite);
+  const status = situacao === "vencido" ? "expired" : invite.status;
   switch (status) {
     case "pending":
       return <Badge variant="outline" className="text-amber-600 border-amber-300"><Clock className="h-3 w-3 mr-1" />Pendente</Badge>;
@@ -68,6 +71,46 @@ const statusBadge = (status: string) => {
   }
 };
 
+function ConfirmarRemocaoConvite({
+  invite,
+  modo,
+  onConfirm,
+  children,
+}: {
+  invite: any;
+  modo: "cancelar" | "excluir";
+  onConfirm: (invite: any) => void;
+  children: ReactNode;
+}) {
+  const nome = nomeConvite(invite);
+  return (
+    <AlertDialog>
+      <AlertDialogTrigger asChild>{children}</AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{modo === "cancelar" ? "Cancelar convite" : `Excluir convite de ${nome}?`}</AlertDialogTitle>
+          <AlertDialogDescription>
+            {modo === "cancelar" ? (
+              <>O link enviado para <strong>{nome}</strong> deixará de funcionar. Deseja continuar?</>
+            ) : (
+              <>O convite será removido definitivamente da lista. Se precisar, você pode convidar <strong>{nome}</strong> novamente depois.</>
+            )}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Voltar</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            onClick={() => onConfirm(invite)}
+          >
+            {modo === "cancelar" ? "Cancelar convite" : "Excluir convite"}
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
+
 export default function GestaoUsuarios() {
   const { user } = useAuth();
   const location = useLocation();
@@ -78,6 +121,7 @@ export default function GestaoUsuarios() {
   const [inviteDefaultRole] = useState<CompanyRole>(location.state?.defaultRole ?? "member");
   const [editingMember, setEditingMember] = useState<EditableMember | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
+  const [renewingId, setRenewingId] = useState<string | null>(null);
 
   useEffect(() => {
     if (location.state?.openInvite) {
@@ -293,14 +337,55 @@ export default function GestaoUsuarios() {
     }
   };
 
-  const handleCancelInvite = async (inviteId: string) => {
-    const { error } = await supabase.from("company_invites").delete().eq("id", inviteId);
+  // Remove o convite e os registros irmãos do mesmo grupo (convite para várias
+  // empresas), nunca os já aceitos. As permissões do banco limitam às empresas
+  // que a pessoa administra.
+  const removerConvite = async (invite: any, sucesso: string, falha: string) => {
+    const { error } = invite.grupo_id
+      ? await supabase
+          .from("company_invites")
+          .delete()
+          .eq("grupo_id", invite.grupo_id)
+          .in("status", [...STATUS_EXCLUIVEIS] as any)
+      : await supabase.from("company_invites").delete().eq("id", invite.id);
     if (error) {
-      toast.error("Erro ao cancelar convite", { description: error.message });
-    } else {
-      toast.success("Convite cancelado");
-      queryClient.invalidateQueries({ queryKey: ["company-invites", activeCompanyId] });
+      toast.error(falha, { description: error.message });
+      return;
     }
+    toast.success(sucesso);
+    queryClient.invalidateQueries({ queryKey: ["company-invites"] });
+  };
+
+  const handleCancelInvite = (invite: any) => removerConvite(invite, "Convite cancelado", "Erro ao cancelar convite");
+  const handleDeleteInvite = (invite: any) => removerConvite(invite, "Convite excluído", "Erro ao excluir convite");
+
+  const handleRenewInvite = async (invite: any) => {
+    setRenewingId(invite.id);
+    const { data, error } = await (supabase as any).rpc("company_invite_renovar", { _invite_id: invite.id });
+    if (error) {
+      setRenewingId(null);
+      toast.error(mensagemErroRenovar(error.message));
+      return;
+    }
+    const token = (data as { token?: string } | null)?.token ?? invite.token;
+    const link = `${window.location.origin}/convite/${token}`;
+    const { data: envio, error: envioErr } = await supabase.functions.invoke("send-company-invite", {
+      body: { inviteId: invite.id },
+    });
+    setRenewingId(null);
+    queryClient.invalidateQueries({ queryKey: ["company-invites"] });
+    try { await navigator.clipboard.writeText(link); } catch { /* sem área de transferência */ }
+    const res = envio as { whatsapp?: boolean; email?: boolean } | null;
+    if (envioErr || (!res?.whatsapp && !res?.email)) {
+      toast.warning("Convite renovado por mais 7 dias", {
+        description: "Não conseguimos enviar automaticamente. O novo link foi copiado para você enviar.",
+      });
+      return;
+    }
+    const canais = [res?.whatsapp ? "WhatsApp" : null, res?.email ? "e-mail" : null].filter(Boolean).join(" e ");
+    toast.success("Convite renovado por mais 7 dias", {
+      description: `Novo link enviado por ${canais} e copiado para você.`,
+    });
   };
 
   const handleCopyLink = (token: string) => {
@@ -626,58 +711,75 @@ export default function GestaoUsuarios() {
                         )}
                       </TableCell>
                       <TableCell>{perfilBadge(invite.perfil, invite.role)}</TableCell>
-                      <TableCell>{statusBadge(invite.status)}</TableCell>
+                      <TableCell>{statusBadge(invite)}</TableCell>
                       <TableCell className="text-right">
                         <div className="flex items-center justify-end gap-1">
-                          {invite.status === "pending" && (
-                            <>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                disabled={resendingId === invite.id}
-                                onClick={() => handleResendInvite(invite)}
-                                title="Reenviar convite"
-                              >
-                                <Send className="h-4 w-4" />
-                              </Button>
-                              <Button
-                                variant="ghost"
-                                size="icon"
-                                className="h-8 w-8"
-                                onClick={() => handleCopyLink(invite.token)}
-                                title="Copiar link"
-                              >
-                                <Copy className="h-4 w-4" />
-                              </Button>
-                              <AlertDialog>
-                                <AlertDialogTrigger asChild>
+                          {(() => {
+                            const acoes = acoesConvite(situacaoConvite(invite));
+                            return (
+                              <>
+                                {acoes.renovar && (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-8"
+                                    disabled={renewingId === invite.id}
+                                    onClick={() => handleRenewInvite(invite)}
+                                  >
+                                    <RefreshCw className={`h-4 w-4 mr-1.5 ${renewingId === invite.id ? "animate-spin" : ""}`} />
+                                    {renewingId === invite.id ? "Renovando..." : "Renovar convite"}
+                                  </Button>
+                                )}
+                                {acoes.reenviar && (
                                   <Button
                                     variant="ghost"
                                     size="icon"
-                                    className="h-8 w-8 text-destructive hover:text-destructive"
-                                    title="Cancelar convite"
+                                    className="h-8 w-8"
+                                    disabled={resendingId === invite.id}
+                                    onClick={() => handleResendInvite(invite)}
+                                    title="Reenviar convite"
                                   >
-                                    <XCircle className="h-4 w-4" />
+                                    <Send className="h-4 w-4" />
                                   </Button>
-                                </AlertDialogTrigger>
-                                <AlertDialogContent>
-                                  <AlertDialogHeader>
-                                    <AlertDialogTitle>Cancelar convite</AlertDialogTitle>
-                                    <AlertDialogDescription>
-                                      O link enviado para <strong>{nomeConvite(invite)}</strong> deixará de funcionar. Deseja continuar?
-                                    </AlertDialogDescription>
-                                  </AlertDialogHeader>
-                                  <AlertDialogFooter>
-                                    <AlertDialogCancel>Voltar</AlertDialogCancel>
-                                    <AlertDialogAction onClick={() => handleCancelInvite(invite.id)}>
-                                      Cancelar convite
-                                    </AlertDialogAction>
-                                  </AlertDialogFooter>
-                                </AlertDialogContent>
-                              </AlertDialog>
-                            </>
-                          )}
+                                )}
+                                {acoes.copiar && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-8 w-8"
+                                    onClick={() => handleCopyLink(invite.token)}
+                                    title="Copiar link"
+                                  >
+                                    <Copy className="h-4 w-4" />
+                                  </Button>
+                                )}
+                                {acoes.cancelar && (
+                                  <ConfirmarRemocaoConvite invite={invite} modo="cancelar" onConfirm={handleCancelInvite}>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-destructive hover:text-destructive"
+                                      title="Cancelar convite"
+                                    >
+                                      <XCircle className="h-4 w-4" />
+                                    </Button>
+                                  </ConfirmarRemocaoConvite>
+                                )}
+                                {acoes.excluir && (
+                                  <ConfirmarRemocaoConvite invite={invite} modo="excluir" onConfirm={handleDeleteInvite}>
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-destructive hover:text-destructive"
+                                      title="Excluir convite"
+                                    >
+                                      <Trash2 className="h-4 w-4" />
+                                    </Button>
+                                  </ConfirmarRemocaoConvite>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </TableCell>
                     </TableRow>
@@ -697,45 +799,57 @@ export default function GestaoUsuarios() {
                     )}
                     <div className="flex flex-wrap items-center gap-1.5">
                       {perfilBadge(invite.perfil, invite.role)}
-                      {statusBadge(invite.status)}
+                      {statusBadge(invite)}
                     </div>
                   </div>
-                  {invite.status === "pending" && (
-                    <div className="grid grid-cols-2 gap-2 border-t pt-2.5">
-                      <Button
-                        size="sm"
-                        className="min-h-10"
-                        disabled={resendingId === invite.id}
-                        onClick={() => handleResendInvite(invite)}
-                      >
-                        <Send className="h-4 w-4 mr-1.5" /> {resendingId === invite.id ? "Enviando..." : "Reenviar"}
-                      </Button>
-                      <Button variant="secondary" size="sm" className="min-h-10" onClick={() => handleCopyLink(invite.token)}>
-                        <Copy className="h-4 w-4 mr-1.5" /> Copiar link
-                      </Button>
-                      <AlertDialog>
-                        <AlertDialogTrigger asChild>
-                          <Button variant="outline" size="sm" className="col-span-2 min-h-10 text-destructive hover:text-destructive">
-                            <XCircle className="h-4 w-4 mr-1.5" /> Cancelar convite
+                  {(() => {
+                    const acoes = acoesConvite(situacaoConvite(invite));
+                    if (!Object.values(acoes).some(Boolean)) return null;
+                    return (
+                      <div className="grid grid-cols-2 gap-2 border-t pt-2.5">
+                        {acoes.renovar && (
+                          <Button
+                            size="sm"
+                            className="col-span-2 min-h-10"
+                            disabled={renewingId === invite.id}
+                            onClick={() => handleRenewInvite(invite)}
+                          >
+                            <RefreshCw className={`h-4 w-4 mr-1.5 ${renewingId === invite.id ? "animate-spin" : ""}`} />
+                            {renewingId === invite.id ? "Renovando..." : "Renovar convite (7 dias)"}
                           </Button>
-                        </AlertDialogTrigger>
-                        <AlertDialogContent>
-                          <AlertDialogHeader>
-                            <AlertDialogTitle>Cancelar convite</AlertDialogTitle>
-                            <AlertDialogDescription>
-                              O link enviado para <strong>{nomeConvite(invite)}</strong> deixará de funcionar. Deseja continuar?
-                            </AlertDialogDescription>
-                          </AlertDialogHeader>
-                          <AlertDialogFooter>
-                            <AlertDialogCancel>Voltar</AlertDialogCancel>
-                            <AlertDialogAction onClick={() => handleCancelInvite(invite.id)}>
-                              Cancelar convite
-                            </AlertDialogAction>
-                          </AlertDialogFooter>
-                        </AlertDialogContent>
-                      </AlertDialog>
-                    </div>
-                  )}
+                        )}
+                        {acoes.reenviar && (
+                          <Button
+                            size="sm"
+                            className="min-h-10"
+                            disabled={resendingId === invite.id}
+                            onClick={() => handleResendInvite(invite)}
+                          >
+                            <Send className="h-4 w-4 mr-1.5" /> {resendingId === invite.id ? "Enviando..." : "Reenviar"}
+                          </Button>
+                        )}
+                        {acoes.copiar && (
+                          <Button variant="secondary" size="sm" className="min-h-10" onClick={() => handleCopyLink(invite.token)}>
+                            <Copy className="h-4 w-4 mr-1.5" /> Copiar link
+                          </Button>
+                        )}
+                        {acoes.cancelar && (
+                          <ConfirmarRemocaoConvite invite={invite} modo="cancelar" onConfirm={handleCancelInvite}>
+                            <Button variant="outline" size="sm" className="col-span-2 min-h-10 text-destructive hover:text-destructive">
+                              <XCircle className="h-4 w-4 mr-1.5" /> Cancelar convite
+                            </Button>
+                          </ConfirmarRemocaoConvite>
+                        )}
+                        {acoes.excluir && (
+                          <ConfirmarRemocaoConvite invite={invite} modo="excluir" onConfirm={handleDeleteInvite}>
+                            <Button variant="outline" size="sm" className="col-span-2 min-h-10 text-destructive hover:text-destructive">
+                              <Trash2 className="h-4 w-4 mr-1.5" /> Excluir convite
+                            </Button>
+                          </ConfirmarRemocaoConvite>
+                        )}
+                      </div>
+                    );
+                  })()}
                 </div>
               ))}
             </div>

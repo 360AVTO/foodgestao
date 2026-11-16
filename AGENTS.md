@@ -67,3 +67,4 @@
 - Onboarding reconciles the signup trial with the selected modules via `fn_onboarding_sincronizar_trial` (converts an unchosen signup trial instead of burning it, covers every chosen module) so v2 access matches what the client picked.
 - Concierge: super admin is temporary owner; server-only `concierge_ativar` transfers ownership, starts trial on activation.
 - Onboarding never copies company phones into `profiles.phone` (notices reach the signer).
+- Company invites: expired (status or past `expires_at`) are renewed only via `company_invite_renovar` (new token, +7 days, caller becomes sender, group-wide within administered companies); cancel/delete remove the whole `grupo_id` except accepted rows — avoids orphan multi-company invites.
