@@ -37,6 +37,14 @@ que usam a mesma conta. As chaves de API de teste são configuradas à parte.
 `RESTORE_DB_URL` é fornecido pelo serviço `postgres:17` do próprio job — não é
 secret.
 
+Se o dry-run reportar versões remotas ausentes no checkout, compare primeiro
+os identificadores e o esquema. O histórico de homologação observado em
+16/11/2026 tem 23 versões próprias de bootstrap L01 e correções posteriores,
+com identificadores ausentes na trilha canônica do repositório. Marcar essas
+versões como revertidas altera o registro, mas mantém os objetos no banco.
+Para convergir, valide a trilha canônica em um banco limpo, compare o esquema e
+recrie as empresas e contas sintéticas necessárias antes de trocar o alvo do CI.
+
 ## Rodando localmente
 
 ```bash

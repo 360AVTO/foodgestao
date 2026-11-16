@@ -96,6 +96,13 @@ const push = spawnSync(
   { encoding: "utf8" },
 );
 const out = `${push.stdout ?? ""}${push.stderr ?? ""}`;
+if (/remote migration versions not found in local migrations directory/i.test(out)) {
+  const versions = out.match(/repair --status reverted((?:\s+\d{14})+)/i)?.[1].trim();
+  console.error(`${RED}✗ o banco tem versões registradas que não existem no checkout.${RESET}`);
+  if (versions) console.error(`Versões remotas divergentes: ${versions}`);
+  console.error("Compare os históricos antes de aplicar migrações. Consulte docs/runbooks/release-gate.md.");
+  process.exit(1);
+}
 console.log(out.trim());
 if (push.status !== 0) {
   console.error(`${RED}✗ dry-run de migrations falhou${RESET}`);
