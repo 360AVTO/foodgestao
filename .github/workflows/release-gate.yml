@@ -151,13 +151,10 @@ jobs:
           sudo apt-get install -y postgresql-client
 
       - name: Verificar secret do banco
+        id: staging-db
         env:
-          DB: ${{ secrets.STAGING_SUPABASE_DB_URL }}
-        run: |
-          if [ -z "$DB" ]; then
-            echo "::error::STAGING_SUPABASE_DB_URL ausente — gate de segurança não pode rodar."
-            exit 1
-          fi
+          STAGING_SUPABASE_DB_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
+        run: node scripts/check-staging-db-secret.mjs
 
       - name: Security linter (strict)
         env:
@@ -175,7 +172,7 @@ jobs:
         run: node scripts/company-scope-lint.mjs --ci --strict --require-db
 
       - name: Relatórios JSON
-        if: always()
+        if: always() && steps.staging-db.outcome == 'success'
         env:
           SUPABASE_DB_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
         run: |
@@ -224,12 +221,8 @@ jobs:
 
       - name: Verificar secret do banco
         env:
-          DB: ${{ secrets.STAGING_SUPABASE_DB_URL }}
-        run: |
-          if [ -z "$DB" ]; then
-            echo "::error::STAGING_SUPABASE_DB_URL ausente — drill de backup não pode rodar."
-            exit 1
-          fi
+          STAGING_SUPABASE_DB_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
+        run: node scripts/check-staging-db-secret.mjs
 
       - name: Supabase CLI
         uses: supabase/setup-cli@v1
