@@ -67,3 +67,4 @@
 - Onboarding reconciles the signup trial with the selected modules via `fn_onboarding_sincronizar_trial` (converts an unchosen signup trial instead of burning it, covers every chosen module) so v2 access matches what the client picked.
 - Concierge: super admin is temporary owner; server-only `concierge_ativar` transfers ownership, starts trial on activation.
 - Onboarding never copies company phones into `profiles.phone` (notices reach the signer).
+- Client-callable `SECURITY DEFINER` routines use static SQL with fixed table/column allowlists, never `EXECUTE` with caller-shaped SQL — caller input must not shape the commands run with owner privileges.
