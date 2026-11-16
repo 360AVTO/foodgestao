@@ -105,7 +105,10 @@ export default function Auth() {
   const [mode, setMode] = useState<Mode>(initialMode);
   const [identifier, setIdentifier] = useState(() => {
     const c = (searchParams.get("cpf") ?? "").replace(/\D/g, "");
-    return c.length === 11 ? c : "";
+    if (c.length === 11) return c;
+    // Vindo de um convite: já traz o e-mail da conta a que o convite foi vinculado.
+    const l = (searchParams.get("login") ?? "").trim().toLowerCase();
+    return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(l) && l.length <= 255 ? l : "";
   });
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");

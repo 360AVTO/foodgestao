@@ -11,6 +11,9 @@ interface CompanyInviteProps {
   inviterName?: string
   role?: string
   inviteUrl?: string
+  /** A pessoa já tem conta: o link confirma a inclusão, não cria senha. */
+  contaExiste?: boolean
+  loginHint?: string
 }
 
 const roleLabel = (r?: string) => {
@@ -22,7 +25,7 @@ const roleLabel = (r?: string) => {
   }
 }
 
-const CompanyInviteEmail = ({ companyName, inviterName, role, inviteUrl }: CompanyInviteProps) => (
+const CompanyInviteEmail = ({ companyName, inviterName, role, inviteUrl, contaExiste, loginHint }: CompanyInviteProps) => (
   <EmailLayout
     siteUrl={SITE_URL}
     siteName={SITE_NAME}
@@ -34,6 +37,15 @@ const CompanyInviteEmail = ({ companyName, inviterName, role, inviteUrl }: Compa
       para participar de <strong>{companyName ?? 'uma empresa'}</strong> no {SITE_NAME} como{' '}
       <strong>{roleLabel(role)}</strong>.
     </Text>
+    {contaExiste ? (
+      <Text style={text}>
+        Você já tem conta no {SITE_NAME}{loginHint ? <> (login: <strong>{loginHint}</strong>)</> : null}. Abra o
+        link e entre com a sua senha atual para confirmar a inclusão. Não reconhece esta conta? Avise quem
+        enviou o convite.
+      </Text>
+    ) : (
+      <Text style={text}>Abra o link para criar a sua senha. O convite vale por 7 dias.</Text>
+    )}
 
     <Section style={{ textAlign: 'center', margin: '28px 0' }}>
       <Button href={inviteUrl} style={cta}>
