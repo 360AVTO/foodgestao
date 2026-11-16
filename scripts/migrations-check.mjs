@@ -16,9 +16,11 @@ const CYAN = "\x1b[36m";
 const RESET = "\x1b[0m";
 
 const DIR = "supabase/migrations";
+const staticOnly = process.argv.includes("--static");
+const requireDryRun = process.argv.includes("--require");
 if (!existsSync(DIR)) {
   console.log(`${YELLOW}⚠ ${DIR} não existe.${RESET}`);
-  process.exit(0);
+  process.exit(requireDryRun ? 1 : 0);
 }
 
 // Baseline: migrations anteriores a este timestamp são históricas e ficam fora
@@ -74,12 +76,16 @@ if (errors.length) {
   process.exit(1);
 }
 console.log(`${GREEN}✓ verificação estática de migrations aprovada${RESET}`);
+if (staticOnly) process.exit(0);
 
 const hasCli = spawnSync("supabase", ["--version"], { encoding: "utf8" }).status === 0;
 if (!hasCli || !process.env.SUPABASE_DB_URL) {
-  console.log(
-    `${YELLOW}⚠ dry-run ignorado (${!hasCli ? "supabase CLI ausente" : "SUPABASE_DB_URL ausente"}).${RESET}`,
-  );
+  const reason = !hasCli ? "supabase CLI ausente" : "SUPABASE_DB_URL ausente";
+  if (requireDryRun) {
+    console.error(`${RED}✗ dry-run obrigatório não executado (${reason}).${RESET}`);
+    process.exit(1);
+  }
+  console.log(`${YELLOW}⚠ dry-run ignorado (${reason}).${RESET}`);
   process.exit(0);
 }
 

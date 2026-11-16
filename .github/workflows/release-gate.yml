@@ -232,7 +232,7 @@ jobs:
       - name: Migrations em sincronia (dry-run)
         env:
           SUPABASE_DB_URL: ${{ secrets.STAGING_SUPABASE_DB_URL }}
-        run: node scripts/migrations-check.mjs
+        run: node scripts/migrations-check.mjs --require
 
       - name: Backup/restore drill
         env:
