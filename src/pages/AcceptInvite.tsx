@@ -4,12 +4,10 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { toast } from "sonner";
 import { CheckCircle, XCircle, Loader2 } from "lucide-react";
-import { MedidorSenha } from "@/components/auth/MedidorSenha";
-import { avaliarSenha } from "@/lib/security/passwordPolicy";
+import { BlocoNovaSenha, focarCampoSenha } from "@/components/auth/BlocoNovaSenha";
+import { motivoSenhaPendente } from "@/lib/security/novaSenha";
 import { INVITE_TOKEN_KEY } from "@/lib/auth/invite";
 
 type Info = { nome: string | null; empresas: string[]; login: "email" | "whatsapp"; login_hint: string; conta_existe: boolean };
@@ -30,6 +28,8 @@ export default function AcceptInvite() {
   const [busy, setBusy] = useState(false);
   const [senha, setSenha] = useState("");
   const [confirma, setConfirma] = useState("");
+  const [tentou, setTentou] = useState(false);
+  const [erroSenha, setErroSenha] = useState<string | null>(null);
 
   useEffect(() => {
     if (authLoading) return;
@@ -73,19 +73,28 @@ export default function AcceptInvite() {
   };
 
 
-  const aval = avaliarSenha(senha, { nome: info?.nome });
-  const podeCriar = aval.valida && senha === confirma;
+  const dadosSenha = { nome: info?.nome };
+  const motivoSenha = motivoSenhaPendente(senha, confirma, dadosSenha);
 
   const handleCriar = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!token || !podeCriar) return;
+    if (!token) return;
+    if (motivoSenha) { setTentou(true); focarCampoSenha(); return; }
+    setErroSenha(null);
     setBusy(true);
     const { data, error } = await supabase.functions.invoke("invite-signup", {
       body: { action: "criar_conta", token, password: senha },
     });
-    const d = data as any;
+    let d = data as any;
+    // Respostas 4xx chegam como exceção: lê o corpo para saber o motivo real.
+    if (error && !d) {
+      try { d = await (error as any).context?.json(); } catch { /* sem corpo legível */ }
+    }
     if (error || d?.error) {
       if (d?.code === "conta_existe") { toast.info(d.error); irParaLogin(); }
+      // Recusa da regra de senha (ex.: contém parte do e-mail completo, que a
+      // tela não conhece): mostra junto do campo, não só num aviso passageiro.
+      else if (d?.code === "senha_fraca") { setErroSenha(d.error); focarCampoSenha(); }
       else toast.error("Não foi possível criar a conta", { description: d?.error ?? "Tente novamente." });
       setBusy(false);
       return;
@@ -127,17 +136,18 @@ export default function AcceptInvite() {
                   <p className="text-xs text-muted-foreground">
                     Seu login será o {info.login === "email" ? "e-mail" : "WhatsApp"} <strong>{info.login_hint}</strong>.
                   </p>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="senha">Crie sua senha</Label>
-                    <Input id="senha" type="password" autoComplete="new-password" value={senha} onChange={(e) => setSenha(e.target.value)} aria-describedby="medidor" />
-                    <MedidorSenha senha={senha} dados={{ nome: info.nome }} id="medidor" />
-                  </div>
-                  <div className="space-y-1.5">
-                    <Label htmlFor="confirma">Confirme a senha</Label>
-                    <Input id="confirma" type="password" autoComplete="new-password" value={confirma} onChange={(e) => setConfirma(e.target.value)} />
-                    {confirma && confirma !== senha && <p className="text-[11px] text-destructive">As senhas não conferem</p>}
-                  </div>
-                  <Button type="submit" className="w-full min-h-11" disabled={busy || !podeCriar}>
+                  <BlocoNovaSenha
+                    senha={senha}
+                    confirma={confirma}
+                    onSenhaChange={(v) => { setSenha(v); setErroSenha(null); }}
+                    onConfirmaChange={setConfirma}
+                    dados={dadosSenha}
+                    rotuloSenha="Crie sua senha"
+                    rotuloConfirma="Confirme a senha"
+                    erroSenha={erroSenha}
+                    tentouEnviar={tentou}
+                  />
+                  <Button type="submit" className="w-full min-h-11" disabled={busy}>
                     {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar senha e entrar"}
                   </Button>
                   <Button type="button" variant="ghost" className="w-full" onClick={irParaLogin}>Já tenho conta</Button>

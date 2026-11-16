@@ -150,14 +150,21 @@ describe("regra única de senha (S3)", () => {
   });
 
   it("todos os caminhos de definir senha usam a regra compartilhada", () => {
+    expect(readFileSync("src/pages/Auth.tsx", "utf8")).toContain("avaliarSenha");
+    // Telas que definem senha usam o bloco único (olhinho, checklist,
+    // conferência e motivo), que avalia pela regra compartilhada.
+    expect(readFileSync("src/lib/security/novaSenha.ts", "utf8")).toContain("avaliarSenha");
     for (const arq of [
-      "src/pages/Auth.tsx",
+      "src/pages/AcceptInvite.tsx",
       "src/pages/ResetPassword.tsx",
       "src/pages/PrimeiroAcesso.tsx",
       "src/pages/AtivarAcesso.tsx",
       "src/pages/EsqueciSenha.tsx",
+      "src/pages/recrutamento/CandidatoAcesso.tsx",
     ]) {
-      expect(readFileSync(arq, "utf8")).toContain("avaliarSenha");
+      const src = readFileSync(arq, "utf8");
+      expect(src).toContain("<BlocoNovaSenha");
+      expect(src).toContain("motivoSenhaPendente(");
     }
     for (const arq of [
       "supabase/functions/dp-alterar-senha-colaborador/index.ts",

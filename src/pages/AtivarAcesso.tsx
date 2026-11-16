@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useLocation, useNavigate, useSearchParams } from "react-router-dom";
 import { Helmet } from "react-helmet-async";
-import { ArrowLeft, CheckCircle2, Eye, EyeOff, Lock } from "lucide-react";
+import { ArrowLeft, CheckCircle2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,18 +9,12 @@ import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { supabase } from "@/integrations/supabase/client";
 import { maskCpf } from "@/lib/cpf";
-import { avaliarSenha } from "@/lib/security/passwordPolicy";
-import { MedidorSenha } from "@/components/auth/MedidorSenha";
-import { ChecklistRequisitosSenha } from "@/components/auth/ChecklistRequisitosSenha";
+import { BlocoNovaSenha, focarCampoSenha } from "@/components/auth/BlocoNovaSenha";
+import { motivoSenhaPendente } from "@/lib/security/novaSenha";
 import { TermoPrimeiroAcesso } from "@/components/auth/TermoPrimeiroAcesso";
 import { TERMO_PORTAL_VERSAO } from "@/lib/dp/termoPortal";
 import { useInstalacaoApp } from "@/components/pwa/useInstalacaoApp";
 import { GuiaInstalacaoApp } from "@/components/pwa/GuiaInstalacaoApp";
-
-/** Regra única de senha nova (S3): src/lib/security/passwordPolicy.ts */
-function validarSenha(senha: string): string | null {
-  return avaliarSenha(senha).mensagem;
-}
 
 /**
  * Ativação e redefinição do acesso ao portal.
@@ -38,7 +32,7 @@ export default function AtivarAcesso() {
   const [cpf, setCpf] = useState("");
   const [senha, setSenha] = useState("");
   const [confirmar, setConfirmar] = useState("");
-  const [mostrar, setMostrar] = useState(false);
+  const [tentou, setTentou] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [linkUsado, setLinkUsado] = useState(false);
   const [enviando, setEnviando] = useState(false);
@@ -85,13 +79,10 @@ export default function AtivarAcesso() {
       setErro("Este link está incompleto. Peça um novo ao setor de pessoal.");
       return;
     }
-    const problema = validarSenha(senha);
-    if (problema) {
-      setErro(problema);
-      return;
-    }
-    if (senha !== confirmar) {
-      setErro("As senhas não coincidem");
+    // Regra única de senha nova (S3): o motivo aparece junto dos campos.
+    if (motivoSenhaPendente(senha, confirmar, { cpf })) {
+      setTentou(true);
+      focarCampoSenha();
       return;
     }
     if (exigeTermo && !termoAceito) {
@@ -143,10 +134,6 @@ export default function AtivarAcesso() {
   };
 
   const titulo = modo === "reset" ? "Criar uma nova senha" : "Ativar seu acesso";
-  // Botão só libera quando a senha atende a todos os requisitos, a confirmação
-  // bate e, na ativação, o termo de primeiro acesso está aceito.
-  const senhaAprovada = avaliarSenha(senha, { cpf }).valida;
-  const termoOk = !exigeTermo || termoAceito;
 
   if (senhaCriadaCpf) {
     const urlLogin =
@@ -280,50 +267,14 @@ export default function AtivarAcesso() {
                   autoComplete="username"
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="senha">Nova senha</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="senha"
-                    type={mostrar ? "text" : "password"}
-                    value={senha}
-                    onChange={(e) => setSenha(e.target.value)}
-                    className="pl-10 pr-10"
-                    maxLength={72}
-                    autoComplete="new-password"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setMostrar((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    aria-label={mostrar ? "Ocultar senha" : "Mostrar senha"}
-                    tabIndex={-1}
-                  >
-                    {mostrar ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <MedidorSenha senha={senha} semMensagem />
-                <ChecklistRequisitosSenha senha={senha} dados={{ cpf }} />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="confirmar">Confirmar nova senha</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    id="confirmar"
-                    type={mostrar ? "text" : "password"}
-                    value={confirmar}
-                    onChange={(e) => setConfirmar(e.target.value)}
-                    className="pl-10"
-                    maxLength={72}
-                    autoComplete="new-password"
-                  />
-                </div>
-                {confirmar && confirmar !== senha && (
-                  <p className="text-xs text-destructive">As senhas não coincidem</p>
-                )}
-              </div>
+              <BlocoNovaSenha
+                senha={senha}
+                confirma={confirmar}
+                onSenhaChange={setSenha}
+                onConfirmaChange={setConfirmar}
+                dados={{ cpf }}
+                tentouEnviar={tentou}
+              />
               {exigeTermo && (
                 <TermoPrimeiroAcesso
                   aceito={termoAceito}
@@ -347,7 +298,7 @@ export default function AtivarAcesso() {
                 <Button
                   type="submit"
                   className="min-h-11 w-full"
-                  disabled={enviando || !senhaAprovada || senha !== confirmar || !termoOk}
+                  disabled={enviando}
                 >
                   {enviando ? "Salvando..." : "Salvar senha e entrar"}
                 </Button>

@@ -2,16 +2,13 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
-import { Lock, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { toast } from "sonner";
 import { z } from "zod";
 import { avaliarSenha, mensagemDoServidorDeContas } from "@/lib/security/passwordPolicy";
-import { MedidorSenha } from "@/components/auth/MedidorSenha";
-import { ChecklistRequisitosSenha } from "@/components/auth/ChecklistRequisitosSenha";
-import { ConferenciaSenhas } from "@/components/auth/ConferenciaSenhas";
+import { BlocoNovaSenha, focarCampoSenha } from "@/components/auth/BlocoNovaSenha";
+import { motivoSenhaPendente } from "@/lib/security/novaSenha";
 import { logAudit } from "@/lib/audit";
 
 const schema = z
@@ -39,6 +36,7 @@ export default function ResetPassword() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [submitting, setSubmitting] = useState(false);
+  const [tentou, setTentou] = useState(false);
 
   useEffect(() => {
     // Supabase emits PASSWORD_RECOVERY when user lands from a recovery link.
@@ -61,6 +59,7 @@ export default function ResetPassword() {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setErrors({});
+    if (motivoSenhaPendente(password, confirmPassword)) { setTentou(true); focarCampoSenha(); return; }
     const parsed = schema.safeParse({ password, confirmPassword });
     if (!parsed.success) {
       const fieldErrors: Record<string, string> = {};
@@ -119,54 +118,20 @@ export default function ResetPassword() {
         ) : (
           <form onSubmit={handleSubmit}>
             <CardContent className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="password">Nova senha</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="password"
-                    name="password"
-                    autoComplete="new-password"
-                    type="password"
-                    placeholder="••••••"
-                    value={password}
-                    onChange={(e) => setPassword(e.target.value)}
-                    className="pl-10"
-                    maxLength={72}
-                    autoFocus
-                  />
-                </div>
-                {errors.password && <p className="text-xs text-destructive">{errors.password}</p>}
-                <MedidorSenha senha={password} semMensagem />
-                <ChecklistRequisitosSenha senha={password} />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="confirmPassword">Confirmar nova senha</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="confirmPassword"
-                    name="confirmPassword"
-                    autoComplete="new-password"
-                    type="password"
-                    placeholder="••••••"
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="pl-10"
-                    maxLength={72}
-                  />
-                </div>
-                {errors.confirmPassword ? (
-                  <p className="text-xs text-destructive">{errors.confirmPassword}</p>
-                ) : (
-                  <ConferenciaSenhas senha={password} confirmacao={confirmPassword} />
-                )}
-              </div>
+              <BlocoNovaSenha
+                senha={password}
+                confirma={confirmPassword}
+                onSenhaChange={(v) => { setPassword(v); setErrors({}); }}
+                onConfirmaChange={setConfirmPassword}
+                erroSenha={errors.password}
+                erroConfirma={errors.confirmPassword}
+                tentouEnviar={tentou}
+                autoFocus
+              />
             </CardContent>
 
             <CardFooter>
-              <Button type="submit" className="w-full min-h-11" disabled={submitting || !avaliarSenha(password).valida || password !== confirmPassword}>
+              <Button type="submit" className="w-full min-h-11" disabled={submitting}>
                 {submitting && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
                 Redefinir Senha
               </Button>

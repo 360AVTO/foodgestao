@@ -6,16 +6,14 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Lock, IdCard, ShieldCheck, MessageCircle, ArrowLeft, Eye, EyeOff } from "lucide-react";
+import { IdCard, ShieldCheck, MessageCircle, ArrowLeft } from "lucide-react";
 import { TurnstileWidget } from "@/components/auth/TurnstileWidget";
 import { useTurnstileConfig } from "@/hooks/useTurnstileSiteKey";
 import { describeTurnstileError, currentHostname } from "@/lib/auth/turnstileErrors";
 import { supabase } from "@/integrations/supabase/client";
 import { toast } from "sonner";
-import { avaliarSenha, SENHA_MIN } from "@/lib/security/passwordPolicy";
-import { MedidorSenha } from "@/components/auth/MedidorSenha";
-import { ChecklistRequisitosSenha } from "@/components/auth/ChecklistRequisitosSenha";
-import { ConferenciaSenhas } from "@/components/auth/ConferenciaSenhas";
+import { BlocoNovaSenha, focarCampoSenha } from "@/components/auth/BlocoNovaSenha";
+import { motivoSenhaPendente } from "@/lib/security/novaSenha";
 
 type Step = "identify" | "otp" | "password" | "done";
 
@@ -63,7 +61,7 @@ export default function EsqueciSenha() {
   const [resetToken, setResetToken] = useState<string | null>(null);
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
-  const [showPw, setShowPw] = useState(false);
+  const [tentouSenha, setTentouSenha] = useState(false);
 
   // OTP expiration countdown
   useEffect(() => {
@@ -227,13 +225,9 @@ export default function EsqueciSenha() {
   async function handleReset(e: React.FormEvent) {
     e.preventDefault();
     if (!challengeId || !resetToken) return;
-    const av = avaliarSenha(newPassword);
-    if (!av.valida) {
-      setAviso(av.mensagem as string);
-      return;
-    }
-    if (newPassword !== confirmPassword) {
-      setAviso("A confirmação está diferente da senha. Digite a mesma senha nos dois campos.");
+    if (motivoSenhaPendente(newPassword, confirmPassword)) {
+      setTentouSenha(true);
+      focarCampoSenha();
       return;
     }
     setAviso(null);
@@ -430,60 +424,19 @@ export default function EsqueciSenha() {
 
           {step === "password" && (
             <form onSubmit={handleReset} className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="new-pw">Nova senha</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="new-pw"
-                    name="password"
-                    autoComplete="new-password"
-                    type={showPw ? "text" : "password"}
-                    value={newPassword}
-                    onChange={(e) => setNewPassword(e.target.value)}
-                    className="pl-10 pr-10"
-                    minLength={SENHA_MIN}
-                    maxLength={72}
-                    autoFocus
-                    required
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowPw((v) => !v)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-muted-foreground"
-                    tabIndex={-1}
-                    aria-label={showPw ? "Ocultar senha" : "Mostrar senha"}
-                  >
-                    {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                  </button>
-                </div>
-                <MedidorSenha senha={newPassword} semMensagem />
-                <ChecklistRequisitosSenha senha={newPassword} />
-              </div>
-
-              <div className="space-y-2">
-                <Label htmlFor="confirm-pw">Confirmar senha</Label>
-                <div className="relative">
-                  <Lock className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    id="confirm-pw"
-                    name="confirmPassword"
-                    autoComplete="new-password"
-                    type={showPw ? "text" : "password"}
-                    value={confirmPassword}
-                    onChange={(e) => setConfirmPassword(e.target.value)}
-                    className="pl-10"
-                    maxLength={128}
-                    required
-                  />
-                </div>
-                <ConferenciaSenhas senha={newPassword} confirmacao={confirmPassword} />
-              </div>
+              <BlocoNovaSenha
+                senha={newPassword}
+                confirma={confirmPassword}
+                onSenhaChange={setNewPassword}
+                onConfirmaChange={setConfirmPassword}
+                tentouEnviar={tentouSenha}
+                autoFocus
+              />
 
               <Button
                 type="submit"
                 className="w-full"
-                disabled={submitting || !avaliarSenha(newPassword).valida || newPassword !== confirmPassword}
+                disabled={submitting}
               >
                 {submitting ? "Salvando..." : "Salvar senha"}
               </Button>
