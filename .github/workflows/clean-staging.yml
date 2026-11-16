@@ -16,6 +16,7 @@ jobs:
     env:
       STAGING_WORKDIR: /tmp/aveto-clean-staging
       STAGING_NETWORK: aveto-clean-staging
+      STAGING_BRIDGE: aveto-ci-br
       LOCAL_SUPABASE_URL: http://127.0.0.1:54321
       LOCAL_DB_URL: postgresql://postgres:postgres@127.0.0.1:54322/postgres
     steps:
@@ -33,7 +34,12 @@ jobs:
           supabase init --workdir "$STAGING_WORKDIR"
           mkdir -p "$STAGING_WORKDIR/supabase/migrations"
           cp supabase/migrations/*.sql "$STAGING_WORKDIR/supabase/migrations/"
-          docker network create --internal "$STAGING_NETWORK"
+          docker network create --driver bridge \
+            --opt "com.docker.network.bridge.name=$STAGING_BRIDGE" "$STAGING_NETWORK"
+          # The CLI connects through a host port. Block new outbound forwarding
+          # from the containers while allowing responses and internal traffic.
+          sudo iptables -I DOCKER-USER -i "$STAGING_BRIDGE" ! -o "$STAGING_BRIDGE" \
+            -m conntrack --ctstate NEW -j DROP
           supabase start --workdir "$STAGING_WORKDIR" --network-id "$STAGING_NETWORK" \
             --exclude studio,postgres-meta,imgproxy,edge-runtime,logflare,vector,mailpit
 
