@@ -270,13 +270,13 @@ export default function AdminReguaCobranca() {
           </CardTitle>
           <div className="flex flex-wrap items-center gap-2">
             <Input
-              placeholder="Buscar por empresa, e-mail ou WhatsApp"
+              placeholder="Empresa, e-mail ou número"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
               className="w-full sm:w-64"
             />
             <Select value={canal} onValueChange={setCanal}>
-              <SelectTrigger className="w-36" aria-label="Canal">
+              <SelectTrigger className="w-full sm:w-44" aria-label="Canal">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -286,7 +286,7 @@ export default function AdminReguaCobranca() {
               </SelectContent>
             </Select>
             <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="w-40" aria-label="Status">
+              <SelectTrigger className="min-w-0 flex-1 sm:w-40 sm:flex-none" aria-label="Status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
