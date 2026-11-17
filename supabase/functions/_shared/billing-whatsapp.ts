@@ -16,6 +16,8 @@ export type WaDados = {
   linkExportacao?: string;
   linkPlanos?: string;
   modulo?: string;
+  plano?: string;
+  detalhePlano?: string;
 };
 
 /** Pós-teste: 3 tentativas, em dias corridos após o fim do teste. */
@@ -25,7 +27,7 @@ export const ATENDIMENTO = "https://wa.me/5562992365959";
 
 /** Avisos que continuam válidos se o envio cair no próximo dia útil. */
 const ADIAVEIS = new Set([
-  "trial_pos_1", "trial_pos_4", "trial_pos_8", "reativacao", "cortesia_encerrada",
+  "trial_pos_1", "trial_pos_4", "trial_pos_8", "reativacao", "oferta_plano", "cortesia_encerrada",
   "d_mais_1", "d_mais_5", "d_mais_20", "d_mais_60",
 ]);
 
@@ -108,6 +110,8 @@ export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
       return `${ola(d)} Este é nosso último contato sobre o teste da *${emp(d)}*.\n\nSe o controle de folgas sem passivo e a clareza do caixa ainda são prioridade este mês, ainda dá tempo de reativar:${planos}\n\nSe decidiu não seguir agora, tudo bem! Seus dados ficam guardados caso queira retomar. Um abraço da equipe AVETO 360.`;
 
     // ---------- carência / cortesia ----------
+    case "oferta_plano":
+      return `${ola(d)} Tudo bem? O acesso${mod(d)} da *${emp(d)}* no AVETO 360 está pausado desde o fim da carência, mas todos os dados continuam salvos.\n\nPelo tamanho da sua equipe, o plano indicado é o *${d.plano ?? "Enterprise"}*${d.detalhePlano ? ` (${d.detalhePlano})` : ""}. A ativação leva 1 minuto, por Pix ou cartão, e libera o acesso na hora:${planos}${rodape}`;
     case "cortesia_encerrada":
       return `${ola(d)} A cortesia${mod(d)} da *${emp(d)}* no AVETO 360 foi encerrada. Liberamos uma carência até *${d.data ?? "os próximos dias"}* para você escolher um plano sem interrupção:${planos}${rodape}`;
     case "grace_d_menos_3":

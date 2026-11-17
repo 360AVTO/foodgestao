@@ -15,6 +15,8 @@ export interface BillingCopyData {
   linkExportacao?: string
   linkPlanos?: string
   modulo?: string
+  plano?: string
+  detalhePlano?: string
 }
 
 export interface BillingCopy {
@@ -65,6 +67,7 @@ export const GRACE_STAGES = [
   'grace_d_menos_3',
   'grace_d_menos_1',
   'grace_d0',
+  'oferta_plano',
 ] as const
 
 export type BillingStage = (typeof BILLING_STAGES)[number] | (typeof TRIAL_STAGES)[number] | (typeof GRACE_STAGES)[number]
@@ -341,6 +344,19 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         ],
         ctaLabel: 'Ver planos',
         ctaKey: 'linkPlanos',
+      }
+    case 'oferta_plano':
+      return {
+        subject: `Plano indicado para a ${empresa(d)} no Aveto 360`,
+        heading: 'Reative o acesso em 1 minuto',
+        paragraphs: [
+          `Olá, ${nome(d)}! O acesso${modulo(d)} da ${empresa(d)} está pausado desde o fim da carência, mas todos os dados continuam guardados.`,
+          `Pelo tamanho da sua equipe, o plano indicado é o ${d.plano ?? 'Enterprise'}${d.detalhePlano ? ` (${d.detalhePlano})` : ''}. A ativação é por Pix ou cartão e libera o acesso na hora.`,
+          'Se tiver dúvidas, basta responder este e-mail.',
+        ],
+        ctaLabel: 'Ativar plano',
+        ctaKey: 'linkPlanos',
+        destaque: 'atencao',
       }
     case 'cortesia_encerrada':
       return {

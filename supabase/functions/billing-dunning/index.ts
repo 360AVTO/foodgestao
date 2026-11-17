@@ -307,7 +307,8 @@ Deno.serve(async (req) => {
 
       if (item.channel === "whatsapp") {
         const payload = (item.payload ?? {}) as Record<string, unknown>;
-        if (!waAtivo) { await cancelar(item.id, "WhatsApp da régua desligado"); continue; }
+        // Envio avulso autorizado pelo super admin não depende do interruptor da régua
+        if (!waAtivo && payload.avulso !== true) { await cancelar(item.id, "WhatsApp da régua desligado"); continue; }
         const validoAte = payload.wa_valido_ate ? new Date(String(payload.wa_valido_ate)) : null;
         if (validoAte && Date.now() > validoAte.getTime()) {
           await cancelar(item.id, "fora do prazo do aviso (o e-mail já foi enviado)");
