@@ -87,7 +87,9 @@ describe("termo da troca com plantões 12x36 seguidos", () => {
     expect(texto).toContain("Art. 59-A");
     expect(texto).toContain("pedida por mim");
   });
-  it("sem plantões seguidos o termo continua com 5 cláusulas", () => {
-    expect(termoTrocaGestorParagrafos(base)).toHaveLength(5);
+  it("sem plantões seguidos o termo da permuta tem as 6 cláusulas, sem o Art. 59-A", () => {
+    const p = termoTrocaGestorParagrafos(base);
+    expect(p).toHaveLength(6);
+    expect(p.join(" ")).not.toContain("Art. 59-A");
   });
 });
