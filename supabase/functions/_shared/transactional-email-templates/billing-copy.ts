@@ -1,7 +1,8 @@
 // Textos oficiais da régua de cobrança e do trial — AVETO 360.
 // Tom cordial e objetivo, sem ameaça nem exposição (art. 42 do CDC).
+import { trechoIndicacao, type DadosIndicacao } from '../billing-plano-indicado.ts'
 
-export interface BillingCopyData {
+export interface BillingCopyData extends DadosIndicacao {
   nome?: string
   empresa?: string
   cnpj?: string
@@ -15,8 +16,6 @@ export interface BillingCopyData {
   linkExportacao?: string
   linkPlanos?: string
   modulo?: string
-  plano?: string
-  detalhePlano?: string
 }
 
 export interface BillingCopy {
@@ -33,6 +32,11 @@ const nome = (d: BillingCopyData) => d.nome || 'tudo bem'
 const empresa = (d: BillingCopyData) => d.empresa || 'sua empresa'
 const modulo = (d: BillingCopyData) => (d.modulo ? ` do ${d.modulo}` : '')
 const valor = (d: BillingCopyData) => d.valor || 'em aberto'
+/** Plano indicado pela equipe real (ou ajuda na implantação) — parágrafo opcional. */
+const ind = (d: BillingCopyData): string[] => {
+  const t = trechoIndicacao(d)
+  return t ? [t] : []
+}
 
 export const BILLING_STAGES = [
   'd_menos_3',
@@ -271,6 +275,7 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         heading: 'Seu teste termina em 2 dias',
         paragraphs: [
           `Olá, ${nome(d)}! O teste gratuito da ${empresa(d)} no Aveto 360 termina em 2 dias.`,
+          ...ind(d),
           'Escolha um plano para manter o acesso sem interrupção.',
         ],
         ctaLabel: 'Ver planos',
@@ -283,6 +288,7 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         heading: 'Seu teste terminou',
         paragraphs: [
           `${nome(d)}, o período de teste da ${empresa(d)} terminou hoje.`,
+          ...ind(d),
           'Para voltar a usar o sistema, escolha um plano pelo botão abaixo. Seus dados continuam guardados.',
         ],
         ctaLabel: 'Escolher um plano',
@@ -294,7 +300,8 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         subject: `Os dados da ${d.empresa ?? 'sua empresa'} continuam salvos no Aveto 360`,
         heading: 'Seus dados continuam salvos',
         paragraphs: [
-          `Olá, ${nome(d)}! O teste gratuito da ${empresa(d)} no Aveto 360 foi encerrado, mas todos os seus dados, colaboradores e cadastros continuam 100% salvos e seguros.`,
+          `Olá, ${nome(d)}! O teste gratuito da ${empresa(d)} no Aveto 360 foi encerrado, mas todos os seus dados${d.indicacao === 'sem_equipe' ? '' : ', colaboradores'} e cadastros continuam 100% salvos e seguros.`,
+          ...ind(d),
           'Para não perder o ritmo da operação, você ativa seu plano em 1 minuto, por Pix ou cartão.',
         ],
         ctaLabel: 'Ativar meu plano',
@@ -306,7 +313,10 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         heading: 'Ajudamos você a começar',
         paragraphs: [
           `Olá, ${nome(d)}! Sabemos como a rotina do restaurante é corrida, e a contratação da ${empresa(d)} ainda não foi concluída.`,
-          'Ficou alguma dúvida na importação da equipe, na escala de folgas ou no financeiro? Ao ativar seu plano, nosso time apoia você na configuração inicial para você não perder tempo com digitação.',
+          d.indicacao === 'sem_equipe'
+            ? 'Ficou alguma dúvida para cadastrar a equipe? Ao ativar seu plano, nosso time apoia você na configuração inicial para você não perder tempo com digitação.'
+            : 'Ficou alguma dúvida para seguir com a implantação? Ao ativar seu plano, nosso time apoia você na configuração inicial para você não perder tempo com digitação.',
+          ...(d.indicacao === 'sem_equipe' ? [] : ind(d)),
         ],
         ctaLabel: 'Ativar meu plano',
         ctaKey: 'linkPlanos',
@@ -318,6 +328,7 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         paragraphs: [
           `${nome(d)}, este é o nosso último contato sobre o teste da ${empresa(d)}.`,
           'Se o controle de folgas sem passivo e a clareza do caixa ainda são prioridade este mês, ainda dá tempo de reativar.',
+          ...ind(d),
           'Se decidiu não seguir agora, tudo bem: seus dados ficam guardados caso queira retomar no futuro.',
         ],
         ctaLabel: 'Reativar acesso',
@@ -365,6 +376,7 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         paragraphs: [
           `Olá, ${nome(d)}! A cortesia${modulo(d)} da ${empresa(d)} no Aveto 360 foi encerrada.`,
           `Para você não perder o acesso, liberamos um período de carência até ${d.data ?? 'os próximos dias'}. Escolha um plano até essa data para continuar usando o sistema sem interrupção.`,
+          ...ind(d),
           'Seus dados continuam guardados. Se tiver dúvidas, basta responder este e-mail.',
         ],
         ctaLabel: 'Escolher plano',
@@ -377,6 +389,7 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         heading: 'Faltam 3 dias para o fim da carência',
         paragraphs: [
           `Olá, ${nome(d)}! O período de carência${modulo(d)} da ${empresa(d)} termina em ${d.data ?? 'breve'}.`,
+          ...ind(d),
           'Escolha um plano para manter o acesso ao sistema sem interrupção.',
         ],
         ctaLabel: 'Escolher plano',
@@ -388,6 +401,7 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         heading: 'Amanhã é o último dia da carência',
         paragraphs: [
           `${nome(d)}, o período de carência${modulo(d)} da ${empresa(d)} termina amanhã, ${d.data ?? ''}.`,
+          ...ind(d),
           'Depois dessa data o acesso fica suspenso até a contratação de um plano.',
         ],
         ctaLabel: 'Escolher plano',
@@ -400,6 +414,7 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         heading: 'Sua carência termina hoje',
         paragraphs: [
           `${nome(d)}, hoje é o último dia da carência${modulo(d)} da ${empresa(d)}.`,
+          ...ind(d),
           'A partir de amanhã o acesso fica suspenso até a contratação de um plano. Seus dados continuam guardados.',
         ],
         ctaLabel: 'Escolher plano',

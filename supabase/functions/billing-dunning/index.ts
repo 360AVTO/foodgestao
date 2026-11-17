@@ -23,6 +23,9 @@ import {
 } from "../_shared/billing-whatsapp.ts";
 import { destinosWhatsappCobranca, whatsappReguaAtivo } from "../_shared/billing-whatsapp-envio.ts";
 import { checkZapiStatus, sendZapiText } from "../_shared/zapi.ts";
+import {
+  ESTAGIOS_COM_INDICACAO, indicarPlanoPessoas, type IndicacaoPlano, type PlanoComPreco,
+} from "../_shared/billing-plano-indicado.ts";
 
 const SITE_URL = "https://www.aveto360.com";
 const LOTE = 200;
@@ -176,6 +179,46 @@ Deno.serve(async (req) => {
     };
   }
 
+  // Plano indicado (Pessoas 360°): só fatos do banco — colaboradores ativos da
+  // conta de cobrança e unidades ativas —, com a mesma regra da tela de planos.
+  let catalogoPessoas: PlanoComPreco[] | null = null;
+  const indicacaoCache = new Map<string, IndicacaoPlano | null>();
+  async function indicacaoDe(row: ScanRow): Promise<Record<string, unknown>> {
+    if (!ESTAGIOS_COM_INDICACAO.has(row.stage)) return {};
+    if (!(row.modulo === "pessoas" || row.modulo === "dp")) return {};
+    try {
+      if (!indicacaoCache.has(row.company_id)) {
+        if (!catalogoPessoas) {
+          const { data } = await admin.from("plans")
+            .select("slug, name, module, sort_order, is_enterprise, features, price_monthly_cents")
+            .eq("module", "pessoas").eq("is_active", true).eq("is_public", true);
+          catalogoPessoas = (data ?? []) as PlanoComPreco[];
+        }
+        const { data: vinc } = await admin.from("billing_account_companies").select("billing_account_id")
+          .eq("company_id", row.company_id).is("removed_at", null).limit(1).maybeSingle();
+        const { data: colab, error: colabErr } = await admin.rpc("_billing_v2_colaboradores_ativos", {
+          _billing_account_id: vinc?.billing_account_id ?? null,
+          _company_id: row.company_id,
+        });
+        const { count: unidades } = await admin.from("dp_unidades")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", row.company_id).eq("ativo", true);
+        indicacaoCache.set(row.company_id, colabErr
+          ? null
+          : indicarPlanoPessoas(catalogoPessoas, { colaboradores: Number(colab ?? 0), unidades: unidades ?? 0 }, SITE_URL));
+      }
+      const ind = indicacaoCache.get(row.company_id);
+      if (!ind) return {};
+      return ind.tipo === "plano"
+        ? { indicacao: "plano", colaboradores: ind.colaboradores, plano: ind.plano, detalhePlano: ind.detalhePlano, plano_slug: ind.slug, linkPlanos: ind.linkPlanos }
+        : { indicacao: ind.tipo, colaboradores: ind.colaboradores, linkPlanos: ind.linkPlanos };
+    } catch (e) {
+      // Sem indicação o lembrete sai como antes (genérico) — nunca com dado inventado.
+      console.error("[billing-dunning] indicação:", e instanceof Error ? e.message : e);
+      return {};
+    }
+  }
+
   try {
     const waAtivo = await whatsappReguaAtivo(admin);
 
@@ -186,8 +229,9 @@ Deno.serve(async (req) => {
     let enfileirados = 0;
     for (const row of (alvos ?? []) as ScanRow[]) {
       const pessoas = await destinatarios(row);
+      const indicacao = await indicacaoDe(row);
       for (const p of pessoas) {
-        const payload = dadosDoEstagio(row, p.nome);
+        const payload = { ...dadosDoEstagio(row, p.nome), ...indicacao };
         const { error } = await admin.from("billing_notifications").insert({
           company_id: row.company_id,
           subscription_id: row.subscription_id,
@@ -218,6 +262,7 @@ Deno.serve(async (req) => {
           }
           const payload = {
             ...dadosDoEstagio(row, n.nome),
+            ...indicacao,
             papel: n.papel,
             wa_valido_ate: validadeWhatsapp(row.stage, agora).toISOString(),
           };

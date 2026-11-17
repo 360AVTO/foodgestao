@@ -2,8 +2,9 @@
 // O e-mail segue como aviso oficial; o WhatsApp é o lembrete de conveniência,
 // com tom cordial e sem exposição (art. 42 do CDC).
 import { normalizeBRPhone } from "./zapi.ts";
+import { trechoIndicacao, type DadosIndicacao } from "./billing-plano-indicado.ts";
 
-export type WaDados = {
+export type WaDados = DadosIndicacao & {
   nome?: string | null;
   empresa?: string;
   valor?: string;
@@ -16,8 +17,6 @@ export type WaDados = {
   linkExportacao?: string;
   linkPlanos?: string;
   modulo?: string;
-  plano?: string;
-  detalhePlano?: string;
 };
 
 /** Pós-teste: 3 tentativas, em dias corridos após o fim do teste. */
@@ -89,6 +88,12 @@ const ola = (d: WaDados) => (d.nome ? `Olá, ${d.nome}!` : "Olá!");
 const emp = (d: WaDados) => d.empresa || "sua empresa";
 const val = (d: WaDados) => d.valor || "em aberto";
 const mod = (d: WaDados) => (d.modulo ? ` do ${d.modulo}` : "");
+/** Plano indicado pela equipe real (ou ajuda na implantação), já com a quebra de parágrafo. */
+const ind = (d: WaDados) => {
+  const t = trechoIndicacao(d, true);
+  return t ? `\n\n${t}` : "";
+};
+const escolha = (d: WaDados, padrao: string) => (d.indicacao === "plano" ? "ative o plano indicado" : padrao);
 const rodape = `\n\nDúvidas? Fale com nosso atendimento: ${ATENDIMENTO}`;
 
 /** Texto do WhatsApp por estágio. `null` = estágio sem versão para WhatsApp. */
@@ -99,27 +104,27 @@ export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
   switch (stage) {
     // ---------- teste grátis ----------
     case "trial_d5":
-      return `${ola(d)} O teste grátis da *${emp(d)}* no AVETO 360 termina em 2 dias${d.data ? ` (${d.data})` : ""}.\n\nPara continuar sem interrupção, escolha seu plano:${planos}${rodape}`;
+      return `${ola(d)} O teste grátis da *${emp(d)}* no AVETO 360 termina em 2 dias${d.data ? ` (${d.data})` : ""}.${ind(d)}\n\nPara continuar sem interrupção, ${escolha(d, "escolha seu plano")}:${planos}${rodape}`;
     case "trial_d7":
-      return `${ola(d)} Hoje é o último dia do teste grátis da *${emp(d)}* no AVETO 360.\n\nEscolha seu plano para manter a operação organizada:${planos}${rodape}`;
+      return `${ola(d)} Hoje é o último dia do teste grátis da *${emp(d)}* no AVETO 360.${ind(d)}\n\nPara manter a operação organizada, ${escolha(d, "escolha seu plano")}:${planos}${rodape}`;
     case "trial_pos_1":
-      return `${ola(d)} Tudo bem? O teste gratuito da *${emp(d)}* no AVETO 360 foi encerrado, mas todos os seus dados, colaboradores e cadastros continuam *100% salvos e seguros*.\n\nPara não perder o ritmo da operação, você ativa seu plano em 1 minuto, por Pix ou cartão:${planos}${rodape}`;
+      return `${ola(d)} Tudo bem? O teste gratuito da *${emp(d)}* no AVETO 360 foi encerrado, mas todos os seus dados${d.indicacao === "sem_equipe" ? "" : ", colaboradores"} e cadastros continuam *100% salvos e seguros*.${ind(d)}\n\nPara não perder o ritmo da operação, você ativa ${d.indicacao === "plano" ? "o plano indicado" : "seu plano"} em 1 minuto, por Pix ou cartão:${planos}${rodape}`;
     case "trial_pos_4":
-      return `${ola(d)} Sabemos como a rotina do restaurante é corrida.\n\nA contratação da *${emp(d)}* ainda não foi concluída. Ficou alguma dúvida na importação da equipe, na escala de folgas ou no financeiro?\n\nAo ativar seu plano, nosso time apoia você na configuração inicial para você não perder tempo com digitação.${planos}${rodape}`;
+      return `${ola(d)} Sabemos como a rotina do restaurante é corrida.\n\nA contratação da *${emp(d)}* ainda não foi concluída. ${d.indicacao === "sem_equipe" ? "Ficou alguma dúvida para cadastrar a equipe?" : "Ficou alguma dúvida para seguir com a implantação?"}${d.indicacao === "sem_equipe" ? "" : ind(d)}\n\nAo ativar seu plano, nosso time apoia você na configuração inicial para você não perder tempo com digitação.${planos}${rodape}`;
     case "trial_pos_8":
-      return `${ola(d)} Este é nosso último contato sobre o teste da *${emp(d)}*.\n\nSe o controle de folgas sem passivo e a clareza do caixa ainda são prioridade este mês, ainda dá tempo de reativar:${planos}\n\nSe decidiu não seguir agora, tudo bem! Seus dados ficam guardados caso queira retomar. Um abraço da equipe AVETO 360.`;
+      return `${ola(d)} Este é nosso último contato sobre o teste da *${emp(d)}*.\n\nSe o controle de folgas sem passivo e a clareza do caixa ainda são prioridade este mês, ainda dá tempo de reativar.${ind(d)}${planos}\n\nSe decidiu não seguir agora, tudo bem! Seus dados ficam guardados caso queira retomar. Um abraço da equipe AVETO 360.`;
 
     // ---------- carência / cortesia ----------
     case "oferta_plano":
       return `${ola(d)} Tudo bem? O acesso${mod(d)} da *${emp(d)}* no AVETO 360 está pausado desde o fim da carência, mas todos os dados continuam salvos.\n\nPelo tamanho da sua equipe, o plano indicado é o *${d.plano ?? "Enterprise"}*${d.detalhePlano ? ` (${d.detalhePlano})` : ""}. A ativação leva 1 minuto, por Pix ou cartão, e libera o acesso na hora:${planos}${rodape}`;
     case "cortesia_encerrada":
-      return `${ola(d)} A cortesia${mod(d)} da *${emp(d)}* no AVETO 360 foi encerrada. Liberamos uma carência até *${d.data ?? "os próximos dias"}* para você escolher um plano sem interrupção:${planos}${rodape}`;
+      return `${ola(d)} A cortesia${mod(d)} da *${emp(d)}* no AVETO 360 foi encerrada. Liberamos uma carência até *${d.data ?? "os próximos dias"}* para você escolher um plano sem interrupção.${ind(d)}${planos}${rodape}`;
     case "grace_d_menos_3":
-      return `${ola(d)} A carência${mod(d)} da *${emp(d)}* termina em *${d.data ?? "3 dias"}*. Escolha um plano para manter o acesso:${planos}${rodape}`;
+      return `${ola(d)} A carência${mod(d)} da *${emp(d)}* termina em *${d.data ?? "3 dias"}*.${ind(d)}\n\nPara manter o acesso, ${escolha(d, "escolha um plano")}:${planos}${rodape}`;
     case "grace_d_menos_1":
-      return `${ola(d)} Amanhã (${d.data ?? ""}) termina a carência${mod(d)} da *${emp(d)}*. Depois disso o acesso fica pausado até a contratação:${planos}${rodape}`;
+      return `${ola(d)} Amanhã (${d.data ?? ""}) termina a carência${mod(d)} da *${emp(d)}*. Depois disso o acesso fica pausado até a contratação.${ind(d)}${planos}${rodape}`;
     case "grace_d0":
-      return `${ola(d)} Hoje é o último dia da carência${mod(d)} da *${emp(d)}*. A partir de amanhã o acesso fica pausado, com os dados guardados:${planos}${rodape}`;
+      return `${ola(d)} Hoje é o último dia da carência${mod(d)} da *${emp(d)}*. A partir de amanhã o acesso fica pausado, com os dados guardados.${ind(d)}${planos}${rodape}`;
 
     // ---------- mensalidade ----------
     case "d_menos_3":
