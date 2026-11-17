@@ -19,6 +19,7 @@ const BRANDS: Record<string, string> = {
   "360°food": "Aveto 360",
   "360food": "Aveto 360",
   "lovable": "Lovable",
+  "whatsapp": "WhatsApp",
 };
 
 const stripDiacritics = (s: string) =>

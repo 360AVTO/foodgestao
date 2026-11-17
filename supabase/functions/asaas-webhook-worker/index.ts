@@ -11,6 +11,8 @@
 import { createClient, type SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { aplicarPendentes, solicitarNfse } from "../_shared/billing-v2-ciclo.ts";
+import { destinosWhatsappCobranca, whatsappReguaAtivo } from "../_shared/billing-whatsapp-envio.ts";
+import { proximoEnvioWhatsapp, validadeWhatsapp } from "../_shared/billing-whatsapp.ts";
 
 /**
  * Comparação de segredos em tempo constante (inline: o bundler desta função não
@@ -28,6 +30,7 @@ function secretMatches(
   for (let i = 0; i < a.length; i++) diff |= a[i] ^ b[i];
   return diff === 0;
 }
+
 
 
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL")!;
@@ -93,6 +96,32 @@ async function pararReguaEAvisar(admin: SupabaseClient, invoice: any): Promise<v
       });
       if (error && error.code !== "23505") {
         console.error("asaas-webhook-worker: reativacao enqueue", error.code, error.message);
+      }
+    }
+
+    // Pós-teste: contratou → encerra as tentativas ainda na fila (todos os canais)
+    await admin.from("billing_notifications")
+      .update({ status: "cancelled", last_error: "plano contratado" })
+      .eq("company_id", (comp as any).id).like("stage", "trial_pos_%").eq("status", "pending");
+
+    // Confirmação também pelo WhatsApp do dono e do financeiro (se a régua estiver com WhatsApp ligado)
+    if (await whatsappReguaAtivo(admin)) {
+      const agora = new Date();
+      const numeros = await destinosWhatsappCobranca(admin, String((comp as any).id), String((comp as any).user_id));
+      for (const n of numeros) {
+        const { error } = await admin.from("billing_notifications").insert({
+          company_id: (comp as any).id,
+          subscription_id: (sub as any).id,
+          invoice_id: invoice.id,
+          stage: "reativacao",
+          channel: "whatsapp",
+          recipient: n.phone,
+          payload: { ...payload, nome: n.nome, papel: n.papel, wa_valido_ate: validadeWhatsapp("reativacao", agora).toISOString() },
+          scheduled_at: proximoEnvioWhatsapp("reativacao", agora).toISOString(),
+        });
+        if (error && error.code !== "23505") {
+          console.error("asaas-webhook-worker: reativacao whatsapp enqueue", error.code, error.message);
+        }
       }
     }
 

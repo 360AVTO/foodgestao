@@ -16,6 +16,7 @@ import { formatCents, precoPorColaborador } from "@/lib/billing";
 import { useEnterpriseElegibilidade } from "@/hooks/useEnterpriseElegibilidade";
 import { toast } from "sonner";
 import { notifyError } from "@/lib/notifyError";
+import { WhatsappFinanceiroCampo } from "@/components/billing/WhatsappFinanceiroCampo";
 
 type Json = Record<string, any>;
 const MODULO: Record<string, string> = { financeiro: "Financeiro 360°", pessoas: "Pessoas 360°" };
@@ -93,6 +94,7 @@ export default function MinhaAssinaturaV2() {
           <CardContent className="grid gap-2 text-sm sm:grid-cols-2">
             <Campo r="Documento do pagador" v={conta.documento_pagador} />
             <Campo r="E-mail de cobrança" v={conta.email_cobranca} />
+            <WhatsappFinanceiroCampo companyId={selectedCompanyId} />
             <div className="sm:col-span-2">
               <Button size="sm" variant="outline" data-testid="editar-pagador" onClick={() => setEditPagador(true)}>Alterar Dados do Pagador</Button>
             </div>
@@ -123,6 +125,7 @@ export default function MinhaAssinaturaV2() {
           <Campo r="Documento do pagador" v={conta.documento_pagador} />
           <Campo r="E-mail de cobrança" v={conta.email_cobranca} />
           <Campo r="Empresas na conta" v={(conta.empresas ?? []).map((e: Json) => e.nome).join(", ")} />
+          <WhatsappFinanceiroCampo companyId={selectedCompanyId} />
           {subs.some((x) => x.pode_gerir) && (
             <div className="sm:col-span-2">
               <Button size="sm" variant="outline" data-testid="editar-pagador" onClick={() => setEditPagador(true)}>Alterar Dados do Pagador</Button>

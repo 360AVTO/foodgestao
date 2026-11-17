@@ -17,7 +17,9 @@ import {
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
-import { RefreshCw, PauseCircle, PlayCircle, Mail } from "lucide-react";
+import { RefreshCw, PauseCircle, PlayCircle, Mail, MessageCircle } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { formatarWhatsapp } from "@/lib/billing/whatsappCobranca";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -28,6 +30,7 @@ type Row = {
   subscription_id: string | null;
   invoice_id: string | null;
   stage: string;
+  channel: string;
   recipient: string;
   status: string;
   attempts: number;
@@ -57,8 +60,22 @@ const ESTAGIOS: Record<string, string> = {
   reativacao: "Pagamento · Reativação",
   trial_d5: "Trial D5 · Termina em 2 dias",
   trial_d7: "Trial D7 · Encerrado",
-  trial_pos_3: "Trial +3 · Reengajamento",
-  trial_pos_10: "Trial +10 · Último contato",
+  trial_pos_1: "Pós-teste D+1 · Tentativa 1",
+  trial_pos_4: "Pós-teste D+4 · Tentativa 2",
+  trial_pos_8: "Pós-teste D+8 · Tentativa 3",
+  trial_pos_3: "Trial +3 · Reengajamento (antigo)",
+  trial_pos_10: "Trial +10 · Último contato (antigo)",
+  cortesia_encerrada: "Cortesia encerrada",
+  grace_d_menos_3: "Carência · Faltam 3 dias",
+  grace_d_menos_1: "Carência · Último dia amanhã",
+  grace_d0: "Carência · Termina hoje",
+};
+
+type Config = { whatsapp_ativo: boolean; atualizado_em: string | null; atualizado_por: string | null };
+type Funil = {
+  dias: number; encerrados: number; tentativa_1: number; tentativa_2: number; tentativa_3: number;
+  contrataram: number; contratou_sem_tentativa: number; contratou_apos_1: number;
+  contratou_apos_2: number; contratou_apos_3: number;
 };
 
 const STATUS_LABEL: Record<string, string> = {
@@ -78,16 +95,19 @@ export default function AdminReguaCobranca() {
   const qc = useQueryClient();
   const [busca, setBusca] = useState("");
   const [status, setStatus] = useState<string>("todos");
+  const [canal, setCanal] = useState<string>("todos");
+  const [confirmarWa, setConfirmarWa] = useState<boolean | null>(null);
   const [pausando, setPausando] = useState<Row | null>(null);
   const [dias, setDias] = useState("15");
   const [motivo, setMotivo] = useState("");
 
   const { data = [], isLoading, refetch, isFetching } = useQuery({
-    queryKey: ["regua-cobranca", status],
+    queryKey: ["regua-cobranca", status, canal],
     queryFn: async () => {
-      const { data, error } = await supabase.rpc("billing_dunning_historico", {
+      const { data, error } = await supabase.rpc("billing_regua_historico", {
         _busca: null,
         _status: status === "todos" ? null : status,
+        _canal: canal === "todos" ? null : canal,
         _limite: 300,
       });
       if (error) throw error;
@@ -95,12 +115,47 @@ export default function AdminReguaCobranca() {
     },
   });
 
+  const config = useQuery({
+    queryKey: ["regua-cobranca-config"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("billing_regua_config_obter");
+      if (error) throw error;
+      return data as unknown as Config;
+    },
+  });
+
+  const funil = useQuery({
+    queryKey: ["regua-cobranca-funil"],
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("billing_regua_funil_pos_teste", { _dias: 60 });
+      if (error) throw error;
+      return data as unknown as Funil;
+    },
+  });
+
+  const definirWa = useMutation({
+    mutationFn: async (ativo: boolean) => {
+      const { error } = await supabase.rpc("billing_regua_whatsapp_definir", { _ativo: ativo });
+      if (error) throw error;
+    },
+    onSuccess: (_d, ativo) => {
+      toast.success(ativo ? "WhatsApp da régua ligado" : "WhatsApp da régua desligado");
+      setConfirmarWa(null);
+      qc.invalidateQueries({ queryKey: ["regua-cobranca-config"] });
+      qc.invalidateQueries({ queryKey: ["regua-cobranca"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Não foi possível alterar o WhatsApp da régua"),
+  });
+
   const filtradas = useMemo(() => {
     const s = busca.trim().toLowerCase();
     if (!s) return data;
     return data.filter(
       (r) =>
-        (r.empresa ?? "").toLowerCase().includes(s) || r.recipient.toLowerCase().includes(s),
+        (r.empresa ?? "").toLowerCase().includes(s) ||
+        r.recipient.toLowerCase().includes(s) ||
+        (r.channel === "whatsapp" && /\d{4,}/.test(s) && r.recipient.includes(s.replace(/\D+/g, ""))),
     );
   }, [data, busca]);
 
@@ -139,23 +194,99 @@ export default function AdminReguaCobranca() {
     <div className="space-y-6">
       <AdminPageHeader
         title="Régua de Cobrança"
-        description="Histórico dos e-mails da assinatura e do teste, com pausa por negociação. O e-mail é o canal oficial de notificação."
+        description="Avisos da assinatura e do teste por e-mail e WhatsApp, com pausa por negociação. O e-mail é o canal oficial de notificação."
       />
 
+      <div className="grid gap-4 lg:grid-cols-2">
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-base">
+              <MessageCircle className="h-4 w-4" /> WhatsApp da Régua
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3 text-sm">
+            <div className="flex items-center justify-between gap-3">
+              <Label htmlFor="wa-regua" className="font-medium">
+                {config.data?.whatsapp_ativo ? "Ligado" : "Desligado"}
+              </Label>
+              <Switch
+                id="wa-regua"
+                checked={!!config.data?.whatsapp_ativo}
+                disabled={config.isLoading || definirWa.isPending}
+                onCheckedChange={(v) => setConfirmarWa(v)}
+              />
+            </div>
+            <p className="text-muted-foreground">
+              Manda os mesmos avisos do e-mail para o WhatsApp do dono e do financeiro, de segunda a
+              sexta, das 9h30 às 11h e das 15h às 16h30. A confirmação de pagamento sai todo dia, das 8h às 20h.
+            </p>
+            {config.data?.atualizado_em ? (
+              <p className="text-xs text-muted-foreground">
+                Alterado em {dataHora(config.data.atualizado_em)}
+                {config.data.atualizado_por ? ` por ${config.data.atualizado_por}` : ""}
+              </p>
+            ) : null}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base">Pós-teste · últimos {funil.data?.dias ?? 60} dias</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {funil.isLoading ? (
+              <p className="text-sm text-muted-foreground">Carregando…</p>
+            ) : funil.data ? (
+              <div className="space-y-3 text-sm">
+                <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+                  {[
+                    ["Testes encerrados", funil.data.encerrados],
+                    ["Tentativa 1 (D+1)", funil.data.tentativa_1],
+                    ["Tentativa 2 (D+4)", funil.data.tentativa_2],
+                    ["Tentativa 3 (D+8)", funil.data.tentativa_3],
+                    ["Contrataram", funil.data.contrataram],
+                  ].map(([r, v]) => (
+                    <div key={r as string} className="rounded-md border p-2">
+                      <p className="text-xs text-muted-foreground">{r}</p>
+                      <p className="text-lg font-semibold">{v as number}</p>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Contrataram sem tentativa: {funil.data.contratou_sem_tentativa} · após a 1ª:{" "}
+                  {funil.data.contratou_apos_1} · após a 2ª: {funil.data.contratou_apos_2} · após a 3ª:{" "}
+                  {funil.data.contratou_apos_3}
+                </p>
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
+
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between gap-4 space-y-0">
+        <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">
           <CardTitle className="flex items-center gap-2 text-base">
             <Mail className="h-4 w-4" /> Envios ({filtradas.length})
           </CardTitle>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Input
-              placeholder="Buscar por empresa ou e-mail"
+              placeholder="Buscar por empresa, e-mail ou WhatsApp"
               value={busca}
               onChange={(e) => setBusca(e.target.value)}
-              className="w-56"
+              className="w-full sm:w-64"
             />
+            <Select value={canal} onValueChange={setCanal}>
+              <SelectTrigger className="w-36" aria-label="Canal">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="todos">Todos os canais</SelectItem>
+                <SelectItem value="email">E-mail</SelectItem>
+                <SelectItem value="whatsapp">WhatsApp</SelectItem>
+              </SelectContent>
+            </Select>
             <Select value={status} onValueChange={setStatus}>
-              <SelectTrigger className="w-40">
+              <SelectTrigger className="w-40" aria-label="Status">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -178,6 +309,7 @@ export default function AdminReguaCobranca() {
                 <TableRow>
                   <TableHead>Empresa</TableHead>
                   <TableHead>Estágio</TableHead>
+                  <TableHead>Canal</TableHead>
                   <TableHead>Destinatário</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Enviado em</TableHead>
@@ -188,13 +320,13 @@ export default function AdminReguaCobranca() {
               <TableBody>
                 {isLoading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                       Carregando…
                     </TableCell>
                   </TableRow>
                 ) : filtradas.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="py-10 text-center text-muted-foreground">
+                    <TableCell colSpan={8} className="py-10 text-center text-muted-foreground">
                       Nenhum envio registrado.
                     </TableCell>
                   </TableRow>
@@ -207,7 +339,19 @@ export default function AdminReguaCobranca() {
                         <TableCell className="whitespace-nowrap text-sm">
                           {ESTAGIOS[r.stage] ?? r.stage}
                         </TableCell>
-                        <TableCell className="text-sm">{r.recipient}</TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {r.channel === "whatsapp" ? (
+                            <span className="inline-flex items-center gap-1"><MessageCircle className="h-4 w-4" /> WhatsApp</span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1"><Mail className="h-4 w-4" /> E-mail</span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-sm">
+                          {r.channel === "whatsapp" ? formatarWhatsapp(r.recipient) : r.recipient}
+                          {r.status === "pending" && r.channel === "whatsapp" ? (
+                            <p className="text-xs text-muted-foreground">Agendado para {dataHora(r.scheduled_at)}</p>
+                          ) : null}
+                        </TableCell>
                         <TableCell>
                           <Badge variant={statusVariant(r.status) as never}>
                             {STATUS_LABEL[r.status] ?? r.status}
@@ -269,6 +413,29 @@ export default function AdminReguaCobranca() {
           </div>
         </CardContent>
       </Card>
+
+      <Dialog open={confirmarWa !== null} onOpenChange={(o) => !o && setConfirmarWa(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{confirmarWa ? "Ligar o WhatsApp da régua?" : "Desligar o WhatsApp da régua?"}</DialogTitle>
+            <DialogDescription>
+              {confirmarWa
+                ? "A partir da próxima rotina, os clientes reais passam a receber pelo WhatsApp da Aveto 360 os avisos de vencimento, de carência, do fim do teste (D+1, D+4 e D+8) e a confirmação de pagamento. O e-mail continua sendo enviado normalmente."
+                : "Os avisos por WhatsApp que ainda não saíram serão cancelados. O e-mail continua funcionando normalmente."}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2">
+            <Button variant="outline" onClick={() => setConfirmarWa(null)}>Cancelar</Button>
+            <Button
+              variant={confirmarWa ? "default" : "destructive"}
+              disabled={definirWa.isPending}
+              onClick={() => confirmarWa !== null && definirWa.mutate(confirmarWa)}
+            >
+              {confirmarWa ? "Ligar WhatsApp" : "Desligar WhatsApp"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={!!pausando} onOpenChange={(o) => !o && setPausando(null)}>
         <DialogContent>

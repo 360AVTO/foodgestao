@@ -52,6 +52,10 @@ export const BILLING_STAGES = [
 export const TRIAL_STAGES = [
   'trial_d5',
   'trial_d7',
+  'trial_pos_1',
+  'trial_pos_4',
+  'trial_pos_8',
+  // históricos (não são mais apurados)
   'trial_pos_3',
   'trial_pos_10',
 ] as const
@@ -281,6 +285,40 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         ctaLabel: 'Escolher um plano',
         ctaKey: 'linkPlanos',
         destaque: 'urgente',
+      }
+    case 'trial_pos_1':
+      return {
+        subject: `Os dados da ${d.empresa ?? 'sua empresa'} continuam salvos no Aveto 360`,
+        heading: 'Seus dados continuam salvos',
+        paragraphs: [
+          `Olá, ${nome(d)}! O teste gratuito da ${empresa(d)} no Aveto 360 foi encerrado, mas todos os seus dados, colaboradores e cadastros continuam 100% salvos e seguros.`,
+          'Para não perder o ritmo da operação, você ativa seu plano em 1 minuto, por Pix ou cartão.',
+        ],
+        ctaLabel: 'Ativar meu plano',
+        ctaKey: 'linkPlanos',
+      }
+    case 'trial_pos_4':
+      return {
+        subject: 'Podemos ajudar na implantação do Aveto 360?',
+        heading: 'Ajudamos você a começar',
+        paragraphs: [
+          `Olá, ${nome(d)}! Sabemos como a rotina do restaurante é corrida, e a contratação da ${empresa(d)} ainda não foi concluída.`,
+          'Ficou alguma dúvida na importação da equipe, na escala de folgas ou no financeiro? Ao ativar seu plano, nosso time apoia você na configuração inicial para você não perder tempo com digitação.',
+        ],
+        ctaLabel: 'Ativar meu plano',
+        ctaKey: 'linkPlanos',
+      }
+    case 'trial_pos_8':
+      return {
+        subject: 'Último contato sobre o teste do Aveto 360',
+        heading: 'Ainda dá tempo de reativar',
+        paragraphs: [
+          `${nome(d)}, este é o nosso último contato sobre o teste da ${empresa(d)}.`,
+          'Se o controle de folgas sem passivo e a clareza do caixa ainda são prioridade este mês, ainda dá tempo de reativar.',
+          'Se decidiu não seguir agora, tudo bem: seus dados ficam guardados caso queira retomar no futuro.',
+        ],
+        ctaLabel: 'Reativar acesso',
+        ctaKey: 'linkPlanos',
       }
     case 'trial_pos_3':
       return {

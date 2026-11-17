@@ -1689,6 +1689,7 @@ export type Database = {
           tipo: Database["public"]["Enums"]["billing_account_type"]
           titular_user_id: string
           updated_at: string
+          whatsapp_cobranca: string | null
         }
         Insert: {
           asaas_customer_id?: string | null
@@ -1707,6 +1708,7 @@ export type Database = {
           tipo: Database["public"]["Enums"]["billing_account_type"]
           titular_user_id: string
           updated_at?: string
+          whatsapp_cobranca?: string | null
         }
         Update: {
           asaas_customer_id?: string | null
@@ -1725,6 +1727,7 @@ export type Database = {
           tipo?: Database["public"]["Enums"]["billing_account_type"]
           titular_user_id?: string
           updated_at?: string
+          whatsapp_cobranca?: string | null
         }
         Relationships: []
       }
@@ -1806,6 +1809,27 @@ export type Database = {
             referencedColumns: ["id"]
           },
         ]
+      }
+      billing_regua_config: {
+        Row: {
+          atualizado_em: string
+          atualizado_por: string | null
+          id: boolean
+          whatsapp_ativo: boolean
+        }
+        Insert: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          id?: boolean
+          whatsapp_ativo?: boolean
+        }
+        Update: {
+          atualizado_em?: string
+          atualizado_por?: string | null
+          id?: boolean
+          whatsapp_ativo?: boolean
+        }
+        Relationships: []
       }
       billing_v2_backfill_snapshot: {
         Row: {
@@ -18850,6 +18874,39 @@ export type Database = {
           subscription_id: string
         }[]
       }
+      billing_regua_config_obter: { Args: never; Returns: Json }
+      billing_regua_funil_pos_teste: { Args: { _dias?: number }; Returns: Json }
+      billing_regua_historico: {
+        Args: {
+          _busca?: string
+          _canal?: string
+          _limite?: number
+          _status?: string
+        }
+        Returns: {
+          attempts: number
+          channel: string
+          company_id: string
+          created_at: string
+          empresa: string
+          id: string
+          invoice_id: string
+          last_error: string
+          pausa_motivo: string
+          pausada_ate: string
+          provider_message_id: string
+          recipient: string
+          scheduled_at: string
+          sent_at: string
+          stage: string
+          status: string
+          subscription_id: string
+        }[]
+      }
+      billing_regua_whatsapp_definir: {
+        Args: { _ativo: boolean }
+        Returns: Json
+      }
       billing_set_dunning_stage: {
         Args: { _stage: number; _subscription_id: string }
         Returns: undefined
@@ -18992,6 +19049,14 @@ export type Database = {
       }
       billing_v2_uso_assinatura: {
         Args: { _subscription_id: string }
+        Returns: Json
+      }
+      billing_v2_whatsapp_cobranca_definir: {
+        Args: { _company_id: string; _whatsapp: string }
+        Returns: Json
+      }
+      billing_v2_whatsapp_cobranca_obter: {
+        Args: { _company_id: string }
         Returns: Json
       }
       can_use_module: {

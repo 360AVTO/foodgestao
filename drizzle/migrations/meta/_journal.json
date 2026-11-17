@@ -1723,6 +1723,13 @@
       "when": 1794847125310,
       "tag": "0245_convite_conferencia_identidade",
       "breakpoints": true
+    },
+    {
+      "idx": 246,
+      "version": "7",
+      "when": 1794939326829,
+      "tag": "0246_regua_cobranca_whatsapp_pos_teste",
+      "breakpoints": true
     }
   ]
 }

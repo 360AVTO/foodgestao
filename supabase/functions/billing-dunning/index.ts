@@ -1,11 +1,13 @@
-// Régua de cobrança e trial do AVETO 360 — 100% por e-mail.
+// Régua de cobrança e trial do AVETO 360 — e-mail (aviso oficial) e WhatsApp
+// (lembrete ao dono e ao responsável financeiro, só com o interruptor ligado).
 //
 // Duas etapas numa única invocação:
 //  1) apura o estágio do dia (public.billing_dunning_scan) e enfileira os
-//     e-mails devidos em public.billing_notifications (índice único impede
-//     duplicidade mesmo se a rotina rodar de novo);
-//  2) drena a fila pendente, reconferindo se a fatura segue em aberto antes
-//     de cada disparo.
+//     avisos devidos em public.billing_notifications (índice único impede
+//     duplicidade mesmo se a rotina rodar de novo); o WhatsApp fica agendado
+//     para a próxima janela comercial (seg–sex, 9h30–11h e 15h–16h30);
+//  2) drena a fila pendente, reconferindo antes de cada disparo se a fatura
+//     segue em aberto, se a carência continua e se o plano não foi contratado.
 //
 // Autorização: verify_jwt = false. Aceita apenas
 //   Authorization: Bearer <SUPABASE_SERVICE_ROLE_KEY>  ou
@@ -16,9 +18,17 @@ import { createClient } from "npm:@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { sendTemplateEmail } from "../_shared/transactional-email-templates/send-email.ts";
 import { STAGE_NUMERO } from "../_shared/transactional-email-templates/billing-copy.ts";
+import {
+  mensagemWhatsapp, proximoEnvioWhatsapp, validadeWhatsapp,
+} from "../_shared/billing-whatsapp.ts";
+import { destinosWhatsappCobranca, whatsappReguaAtivo } from "../_shared/billing-whatsapp-envio.ts";
+import { checkZapiStatus, sendZapiText } from "../_shared/zapi.ts";
 
 const SITE_URL = "https://www.aveto360.com";
 const LOTE = 200;
+const WA_POR_EXECUCAO = 40;
+const WA_INTERVALO_MS = 1200;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 function timingSafeEqual(a: string, b: string): boolean {
   if (a.length === 0 || b.length === 0 || a.length !== b.length) return false;
@@ -167,6 +177,8 @@ Deno.serve(async (req) => {
   }
 
   try {
+    const waAtivo = await whatsappReguaAtivo(admin);
+
     // ---------- 1) apuração e enfileiramento -------------------------------
     const { data: alvos, error: scanErr } = await admin.rpc("billing_dunning_scan");
     if (scanErr) throw scanErr;
@@ -191,6 +203,41 @@ Deno.serve(async (req) => {
           console.error("[billing-dunning] enqueue:", error.code, error.message);
         }
       }
+      if (waAtivo && mensagemWhatsapp(row.stage, {}) !== null) {
+        const agora = new Date();
+        const numeros = await destinosWhatsappCobranca(admin, row.company_id, row.owner_user_id);
+        for (const n of numeros) {
+          // Sem repetir o mesmo aviso para o mesmo número (ex.: teste dos dois módulos)
+          if (!row.invoice_id) {
+            const { count } = await admin.from("billing_notifications")
+              .select("id", { count: "exact", head: true })
+              .eq("company_id", row.company_id).eq("stage", row.stage)
+              .eq("channel", "whatsapp").eq("recipient", n.phone)
+              .gte("created_at", new Date(agora.getTime() - 3 * 24 * 3600 * 1000).toISOString());
+            if ((count ?? 0) > 0) continue;
+          }
+          const payload = {
+            ...dadosDoEstagio(row, n.nome),
+            papel: n.papel,
+            wa_valido_ate: validadeWhatsapp(row.stage, agora).toISOString(),
+          };
+          const { error } = await admin.from("billing_notifications").insert({
+            company_id: row.company_id,
+            subscription_id: row.subscription_id,
+            invoice_id: row.invoice_id,
+            stage: row.stage,
+            channel: "whatsapp",
+            recipient: n.phone,
+            payload,
+            scheduled_at: proximoEnvioWhatsapp(row.stage, agora).toISOString(),
+          });
+          if (!error) enfileirados++;
+          else if (error.code !== "23505") {
+            console.error("[billing-dunning] enqueue whatsapp:", error.code, error.message);
+          }
+        }
+      }
+
       const numero = STAGE_NUMERO[row.stage];
       if (typeof numero === "number" && numero > 0) {
         await admin.rpc("billing_set_dunning_stage", {
@@ -202,7 +249,7 @@ Deno.serve(async (req) => {
 
     // ---------- 2) drenagem da fila ---------------------------------------
     const { data: fila, error: filaErr } = await admin.from("billing_notifications")
-      .select("id, stage, recipient, invoice_id, subscription_id, payload, attempts")
+      .select("id, company_id, stage, channel, recipient, invoice_id, subscription_id, payload, attempts")
       .eq("status", "pending")
       .lte("scheduled_at", new Date().toISOString())
       .lt("attempts", 5)
@@ -210,7 +257,14 @@ Deno.serve(async (req) => {
       .limit(LOTE);
     if (filaErr) throw filaErr;
 
-    let enviados = 0, cancelados = 0, falhas = 0;
+    let enviados = 0, cancelados = 0, falhas = 0, waEnviados = 0;
+    let zapiConectado: boolean | null = null;
+
+    const cancelar = async (id: string, motivo: string) => {
+      await admin.from("billing_notifications")
+        .update({ status: "cancelled", last_error: motivo }).eq("id", id);
+      cancelados++;
+    };
 
     for (const item of fila ?? []) {
       // reconferência: fatura quitada no meio do caminho cancela o envio
@@ -237,6 +291,73 @@ Deno.serve(async (req) => {
           cancelados++;
           continue;
         }
+      }
+
+      // pós-teste: plano contratado antes do envio encerra as tentativas
+      if (String(item.stage).startsWith("trial_pos_")) {
+        const { count } = await admin.from("subscriptions")
+          .select("id", { count: "exact", head: true })
+          .eq("company_id", item.company_id).eq("asaas_env", "production")
+          .in("status", ["active", "grace", "past_due"]);
+        if ((count ?? 0) > 0) {
+          await cancelar(item.id, "plano contratado antes do envio");
+          continue;
+        }
+      }
+
+      if (item.channel === "whatsapp") {
+        const payload = (item.payload ?? {}) as Record<string, unknown>;
+        if (!waAtivo) { await cancelar(item.id, "WhatsApp da régua desligado"); continue; }
+        const validoAte = payload.wa_valido_ate ? new Date(String(payload.wa_valido_ate)) : null;
+        if (validoAte && Date.now() > validoAte.getTime()) {
+          await cancelar(item.id, "fora do prazo do aviso (o e-mail já foi enviado)");
+          continue;
+        }
+        const quando = proximoEnvioWhatsapp(item.stage, new Date());
+        if (quando.getTime() > Date.now()) {
+          await admin.from("billing_notifications")
+            .update({ scheduled_at: quando.toISOString() }).eq("id", item.id);
+          continue;
+        }
+        if (waEnviados >= WA_POR_EXECUCAO) continue;
+        const texto = mensagemWhatsapp(item.stage, payload as never);
+        if (!texto) { await cancelar(item.id, "estágio sem mensagem de WhatsApp"); continue; }
+
+        if (zapiConectado === null) zapiConectado = (await checkZapiStatus()).connected;
+        const tentativas = (item.attempts ?? 0) + 1;
+        if (!zapiConectado) {
+          await admin.from("billing_notifications").update({
+            status: tentativas >= 5 ? "failed" : "pending",
+            attempts: tentativas,
+            last_error: "WhatsApp da Aveto desconectado",
+            scheduled_at: new Date(Date.now() + 30 * 60 * 1000).toISOString(),
+          }).eq("id", item.id);
+          falhas++;
+          continue;
+        }
+        if (waEnviados > 0) await sleep(WA_INTERVALO_MS);
+        const r = await sendZapiText(item.recipient, texto);
+        if (r.ok) {
+          await admin.from("billing_notifications").update({
+            status: "sent",
+            sent_at: new Date().toISOString(),
+            attempts: tentativas,
+            provider_message_id: r.messageId ?? `zapi-${item.id}`,
+            last_error: null,
+          }).eq("id", item.id);
+          enviados++; waEnviados++;
+        } else {
+          await admin.from("billing_notifications").update({
+            status: tentativas >= 3 ? "failed" : "pending",
+            attempts: tentativas,
+            last_error: tentativas >= 3
+              ? "Não foi possível entregar neste número. Confira o WhatsApp com DDD."
+              : `falha temporária no envio (${r.error ?? "zapi"})`,
+            scheduled_at: new Date(Date.now() + tentativas * 30 * 60 * 1000).toISOString(),
+          }).eq("id", item.id);
+          falhas++; waEnviados++;
+        }
+        continue;
       }
 
       try {
@@ -274,7 +395,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ ok: true, alvos: (alvos ?? []).length, enfileirados, enviados, cancelados, falhas });
+    return json({ ok: true, whatsapp_ativo: waAtivo, alvos: (alvos ?? []).length, enfileirados, enviados, whatsapp_enviados: waEnviados, cancelados, falhas });
   } catch (e) {
     console.error("[billing-dunning]", e instanceof Error ? e.message : e);
     return json({ ok: false, error: "Falha na régua de cobrança" }, 500);
