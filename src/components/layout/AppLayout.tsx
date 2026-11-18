@@ -38,7 +38,7 @@ export function AppLayout() {
           <ParametrizacaoAvetoBarra />
           <TrialCountdownBanner />
           <AtrasoPagamentoBanner />
-          <AcessoModulosBanner />
+          <AcessoModulosBanner avisoAssinatura={avisoAssinatura} />
           <CarenciaBanner />
           <main className="flex-1 p-3 md:p-6 pb-22 md:pb-6">
             <PullToRefresh onRefresh={() => queryClient.invalidateQueries()}>

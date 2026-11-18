@@ -1,14 +1,19 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Hourglass, MessageCircle, RefreshCw } from "lucide-react";
+import { ChevronDown, Hourglass, MessageCircle, PauseCircle, PlayCircle, RefreshCw } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { usePlans, MODULE_LABELS, type PlanModule } from "@/hooks/usePlans";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { formatarWhatsapp, validarWhatsappCobranca } from "@/lib/billing/whatsappCobranca";
+import { fimDaPausa, MOTIVO_NEGOCIACAO, OPCOES_PAUSA_DIAS, pausaAtiva } from "@/lib/billing/pausaRegua";
 import {
   indicarPlanoPessoas, type PlanoComPreco,
 } from "../../../supabase/functions/_shared/billing-plano-indicado.ts";
@@ -27,6 +32,9 @@ type Linha = {
   contato_telefone: string | null;
   aviso_enviado_em: string | null;
   ultimo_dia_enviado_em: string | null;
+  pausada_ate: string | null;
+  pausa_motivo: string | null;
+  gestores: Array<{ nome: string | null; telefone: string | null; papel: "dono" | "admin" }> | null;
 };
 
 const quando = (v: string | null) =>
@@ -34,12 +42,30 @@ const quando = (v: string | null) =>
 
 /** Testes que encerram nos próximos dias, com a maior equipe primeiro — para o contato da equipe Aveto. */
 export function RetaFinalTestesCard() {
+  const qc = useQueryClient();
+  const pausar = useMutation({
+    mutationFn: async (args: { subscriptionId: string; dias: number | null }) => {
+      const { error } = await supabase.rpc("billing_dunning_pausar", {
+        _subscription_id: args.subscriptionId,
+        _until: args.dias ? fimDaPausa(args.dias).toISOString() : null,
+        _motivo: args.dias ? MOTIVO_NEGOCIACAO : null,
+      });
+      if (error) throw error;
+    },
+    onSuccess: (_d, args) => {
+      toast.success(args.dias ? `Régua pausada por ${args.dias} dias` : "Régua retomada");
+      qc.invalidateQueries({ queryKey: ["regua-reta-final"] });
+      qc.invalidateQueries({ queryKey: ["regua-cobranca"] });
+    },
+    onError: (e: unknown) =>
+      toast.error(e instanceof Error ? e.message : "Não foi possível atualizar a régua"),
+  });
   const lista = useQuery({
     queryKey: ["regua-reta-final"],
     queryFn: async () => {
       const { data, error } = await supabase.rpc("billing_regua_reta_final", { _dias: 5 });
       if (error) throw error;
-      return (data ?? []) as Linha[];
+      return (data ?? []) as unknown as Linha[];
     },
   });
   const planos = usePlans();
@@ -65,7 +91,8 @@ export function RetaFinalTestesCard() {
       <CardContent className="space-y-3 text-sm">
         <p className="text-muted-foreground">
           Testes que encerram nos próximos 5 dias, com a maior equipe primeiro. O cliente recebe um aviso
-          3 dias antes e outro no último dia; respostas no WhatsApp chegam à equipe Aveto.
+          3 dias antes e outro no último dia (dono e administradores); respostas no WhatsApp chegam à equipe Aveto.
+          Em negociação, pause a régua para o robô não enviar nada automático.
         </p>
         {lista.isLoading ? (
           <p className="text-muted-foreground">Carregando…</p>
@@ -80,8 +107,10 @@ export function RetaFinalTestesCard() {
               const ind = pessoas && catalogo.length
                 ? indicarPlanoPessoas(catalogo, { colaboradores: r.colaboradores, unidades: r.unidades })
                 : null;
-              const zap = validarWhatsappCobranca(r.contato_telefone);
-              const numero = zap.ok ? zap.valor : null;
+              const pausada = pausaAtiva(r.pausada_ate);
+              const gestores = r.gestores?.length
+                ? r.gestores
+                : [{ nome: r.contato_nome, telefone: r.contato_telefone, papel: "dono" as const }];
               const fim = format(new Date(r.trial_ends_at), "dd/MM/yyyy", { locale: ptBR });
               const prazo = prazoDoTeste(r.dias_restantes, fim);
               return (
@@ -112,18 +141,64 @@ export function RetaFinalTestesCard() {
                     <span>Aviso de 3 dias: {quando(r.aviso_enviado_em) ?? "não enviado"}</span>
                     <span>Último dia: {quando(r.ultimo_dia_enviado_em) ?? "não enviado"}</span>
                   </div>
-                  <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
-                    <span className="text-xs">
-                      {r.contato_nome ?? "Dono sem nome"}
-                      {numero ? ` · ${formatarWhatsapp(numero)}` : " · sem WhatsApp"}
-                    </span>
-                    {numero ? (
-                      <Button asChild variant="outline" size="sm">
-                        <a href={`https://wa.me/${numero}`} target="_blank" rel="noopener noreferrer">
-                          <MessageCircle className="h-4 w-4" /> Chamar
-                        </a>
+                  {pausada ? (
+                    <p className="mt-2 inline-flex items-center gap-1 rounded-md border border-warning/40 bg-warning/10 px-2 py-1 text-xs text-foreground">
+                      <PauseCircle className="h-3.5 w-3.5 text-warning" aria-hidden="true" />
+                      Régua pausada até {format(new Date(r.pausada_ate!), "dd/MM", { locale: ptBR })}
+                      {r.pausa_motivo ? ` · ${r.pausa_motivo}` : ""}
+                    </p>
+                  ) : null}
+                  <ul className="mt-2 space-y-1">
+                    {gestores.map((g, i) => {
+                      const z = validarWhatsappCobranca(g.telefone);
+                      const n = z.ok ? z.valor : null;
+                      return (
+                        <li key={`${g.nome}-${i}`} className="flex flex-wrap items-center justify-between gap-2">
+                          <span className="text-xs">
+                            {g.nome ?? "Sem nome"} ({g.papel === "dono" ? "Dono" : "Administrador"})
+                            {n ? ` · ${formatarWhatsapp(n)}` : " · sem WhatsApp"}
+                          </span>
+                          {n ? (
+                            <Button asChild variant="outline" size="sm">
+                              <a href={`https://wa.me/${n}`} target="_blank" rel="noopener noreferrer">
+                                <MessageCircle className="h-4 w-4" /> Chamar
+                              </a>
+                            </Button>
+                          ) : null}
+                        </li>
+                      );
+                    })}
+                  </ul>
+                  <div className="mt-2 flex justify-end">
+                    {pausada ? (
+                      <Button
+                        variant="outline" size="sm" disabled={pausar.isPending}
+                        onClick={() => pausar.mutate({ subscriptionId: r.subscription_id, dias: null })}
+                      >
+                        <PlayCircle className="h-4 w-4" /> Retomar régua
                       </Button>
-                    ) : null}
+                    ) : (
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button variant="outline" size="sm" disabled={pausar.isPending}>
+                            <PauseCircle className="h-4 w-4" /> Pausar régua <ChevronDown className="h-3.5 w-3.5" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuLabel className="text-xs font-normal text-muted-foreground">
+                            Em negociação com a equipe
+                          </DropdownMenuLabel>
+                          {OPCOES_PAUSA_DIAS.map((d) => (
+                            <DropdownMenuItem
+                              key={d}
+                              onClick={() => pausar.mutate({ subscriptionId: r.subscription_id, dias: d })}
+                            >
+                              Pausar {d} dias (até {format(fimDaPausa(d), "dd/MM", { locale: ptBR })})
+                            </DropdownMenuItem>
+                          ))}
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    )}
                   </div>
                 </li>
               );

@@ -72,18 +72,28 @@ export function validadeWhatsapp(stage: string, criadoEm: Date): Date {
   return new Date(fimDoDia + BRT_MS);
 }
 
-export type DestinoWa = { phone: string; nome: string | null; papel: "dono" | "financeiro" };
+export type DestinoWa = { phone: string; nome: string | null; papel: "dono" | "admin" | "financeiro" };
 
-/** Dono primeiro; o financeiro só entra se for outro número. Inválidos ficam de fora. */
+/**
+ * Dono primeiro, depois os demais gestores (donos/administradores ativos da empresa),
+ * e o financeiro só se for outro número. Cada número recebe uma única vez; inválidos ficam de fora.
+ */
 export function destinosWhatsapp(
   dono: { telefone?: string | null; nome?: string | null },
   financeiro: { telefone?: string | null },
+  gestores: Array<{ telefone?: string | null; nome?: string | null }> = [],
 ): DestinoWa[] {
   const saida: DestinoWa[] = [];
-  const d = normalizeBRPhone(dono.telefone ?? null);
-  if (d) saida.push({ phone: d, nome: dono.nome ?? null, papel: "dono" });
-  const f = normalizeBRPhone(financeiro.telefone ?? null);
-  if (f && f !== d) saida.push({ phone: f, nome: null, papel: "financeiro" });
+  const vistos = new Set<string>();
+  const add = (tel: string | null | undefined, nome: string | null, papel: DestinoWa["papel"]) => {
+    const n = normalizeBRPhone(tel ?? null);
+    if (!n || vistos.has(n)) return;
+    vistos.add(n);
+    saida.push({ phone: n, nome, papel });
+  };
+  add(dono.telefone, dono.nome ?? null, "dono");
+  for (const g of gestores) add(g.telefone, g.nome ?? null, "admin");
+  add(financeiro.telefone, null, "financeiro");
   return saida;
 }
 

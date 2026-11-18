@@ -73,16 +73,21 @@ export function useAvisoAssinatura() {
   const indicacao = useIndicacaoPessoas(resumo.data?.colaboradores, resumo.data?.unidades, pessoas && !!resumo.data);
 
   const [fechado, setFechado] = useState<string | null>(null);
+  const [reaberto, setReaberto] = useState(false);
   useEffect(() => { if (chave && lerSessao(chave)) setFechado(chave); }, [chave]);
 
   const fechar = useCallback(() => {
     if (!chave) return;
     gravarSessao(chave);
     setFechado(chave);
+    setReaberto(false);
   }, [chave]);
 
-  // Só abre com o resumo carregado: membro que não é da empresa recebe null e não vê o balão.
-  const aberto = !!aviso && !!chave && fechado !== chave && !lerSessao(chave) && !!resumo.data;
+  /** "Ver detalhes" da faixa do topo: reabre o balão no mesmo dia. */
+  const abrir = useCallback(() => setReaberto(true), []);
 
-  return { aviso, resumo: resumo.data ?? null, indicacao, aberto, fechar };
+  // Só abre com o resumo carregado: membro que não é da empresa recebe null e não vê o balão.
+  const aberto = !!aviso && !!chave && !!resumo.data && (reaberto || (fechado !== chave && !lerSessao(chave)));
+
+  return { aviso, resumo: resumo.data ?? null, indicacao, aberto, fechar, abrir };
 }

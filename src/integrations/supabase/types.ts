@@ -18914,7 +18914,10 @@ export type Database = {
           contato_telefone: string
           dias_restantes: number
           empresa: string
+          gestores: Json
           modulo: string
+          pausa_motivo: string
+          pausada_ate: string
           subscription_id: string
           trial_ends_at: string
           ultimo_dia_enviado_em: string

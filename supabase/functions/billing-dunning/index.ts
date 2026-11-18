@@ -315,7 +315,26 @@ Deno.serve(async (req) => {
       cancelados++;
     };
 
+    // Régua pausada por negociação: nada sai enquanto a pausa valer (inclusive o que já estava na fila).
+    const pausaCache = new Map<string, boolean>();
+    const pausada = async (subId: string) => {
+      if (!pausaCache.has(subId)) {
+        const { data: sub } = await admin.from("subscriptions").select("dunning_paused_until")
+          .eq("id", subId).maybeSingle();
+        const ate = sub?.dunning_paused_until ? new Date(String(sub.dunning_paused_until)).getTime() : 0;
+        pausaCache.set(subId, ate > Date.now());
+      }
+      return pausaCache.get(subId) === true;
+    };
+
     for (const item of fila ?? []) {
+      const payloadItem = (item.payload ?? {}) as Record<string, unknown>;
+      if (item.subscription_id && item.stage !== "reativacao" && payloadItem.avulso !== true
+        && await pausada(String(item.subscription_id))) {
+        await cancelar(item.id, "régua pausada por negociação");
+        continue;
+      }
+
       // reconferência: fatura quitada no meio do caminho cancela o envio
       if (item.invoice_id && item.stage !== "reativacao") {
         const { data: fat } = await admin.from("invoices").select("status")

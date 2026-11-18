@@ -160,3 +160,16 @@ export function linkWhatsappEquipe(texto: string, numero = WHATSAPP_EQUIPE_AVETO
 export function chaveBalao(companyId: string, av: AvisoAssinatura, agora: Date = new Date()): string {
   return `aviso-assinatura:${companyId}:${av.modulo}:${av.fase}:${diaBrasilia(agora)}`;
 }
+
+/**
+ * Faixa do topo na reta final (atalho depois de fechar o balão):
+ * "Período de teste do Pessoas 360° encerra amanhã, quinta-feira (19/11) · 47 colaboradores · Plano indicado: Enterprise".
+ */
+export function textoFaixaAviso(av: AvisoAssinatura, colaboradores?: number | null, plano?: string | null): string {
+  const periodo = av.tipo === "teste" ? "Período de teste" : "Período de carência";
+  const partes = [`${periodo} do ${ROTULO_MODULO[av.modulo]} ${textoPrazo(av)}`];
+  const n = Number(colaboradores ?? 0);
+  if (av.modulo === "pessoas" && n > 0) partes.push(`${n} ${n === 1 ? "colaborador" : "colaboradores"}`);
+  if (plano) partes.push(`Plano indicado: ${plano}`);
+  return partes.join(" · ");
+}

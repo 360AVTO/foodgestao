@@ -63,3 +63,21 @@ Deno.test("todos os estágios da régua têm mensagem de WhatsApp", () => {
   }
   assertEquals(mensagemWhatsapp("desconhecido", {}), null);
 });
+
+Deno.test("destinatários: dono e administradores recebem, cada número uma vez", () => {
+  const r = destinosWhatsapp(
+    { telefone: "(64) 99216-8514", nome: "Maria" },
+    { telefone: "62999990009" },
+    [{ telefone: "62 99999-0002", nome: "Gabriel" }, { telefone: "+55 64 99216-8514", nome: "Repetido" }, { telefone: null, nome: "Sem número" }],
+  );
+  assertEquals(r.map((x) => [x.phone, x.nome, x.papel]), [
+    ["5564992168514", "Maria", "dono"],
+    ["5562999990002", "Gabriel", "admin"],
+    ["5562999990009", null, "financeiro"],
+  ]);
+});
+
+Deno.test("destinatários: administrador com o mesmo número do financeiro recebe com o próprio nome", () => {
+  const r = destinosWhatsapp({ telefone: null }, { telefone: "61981358143" }, [{ telefone: "(61) 98135-8143", nome: "Samanta" }]);
+  assertEquals(r.map((x) => [x.nome, x.papel]), [["Samanta", "admin"]]);
+});

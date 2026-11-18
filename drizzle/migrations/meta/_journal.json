@@ -1744,6 +1744,13 @@
       "when": 1795008492893,
       "tag": "0248_aviso_fim_teste_gestores",
       "breakpoints": true
+    },
+    {
+      "idx": 249,
+      "version": "7",
+      "when": 1795009466043,
+      "tag": "0249_reta_final_pausa_gestores",
+      "breakpoints": true
     }
   ]
 }

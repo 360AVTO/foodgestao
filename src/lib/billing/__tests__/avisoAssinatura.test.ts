@@ -64,3 +64,18 @@ describe("aviso de fim de teste/carência", () => {
     expect(chaveBalao("c1", av, agora)).not.toBe(chaveBalao("c1", av, new Date("2026-11-19T13:00:00Z")));
   });
 });
+
+describe("faixa do topo na reta final", () => {
+  it("Rancho 330: prazo, equipe e plano indicado numa linha", async () => {
+    const { textoFaixaAviso } = await import("../avisoAssinatura");
+    const av = { modulo: "pessoas" as const, fase: "reta_final" as const, tipo: "teste" as const, dias: 1, fim: "2026-11-20T02:59:59Z" };
+    expect(textoFaixaAviso(av, 47, "Pessoas 360° Enterprise"))
+      .toBe("Período de teste do Pessoas 360° encerra amanhã, quinta-feira (19/11) · 47 colaboradores · Plano indicado: Pessoas 360° Enterprise");
+  });
+
+  it("sem equipe nem plano mostra só o prazo", async () => {
+    const { textoFaixaAviso } = await import("../avisoAssinatura");
+    const av = { modulo: "pessoas" as const, fase: "reta_final" as const, tipo: "teste" as const, dias: 0, fim: "2026-11-19T02:59:59Z" };
+    expect(textoFaixaAviso(av, 0, null)).toBe("Período de teste do Pessoas 360° encerra hoje");
+  });
+});
