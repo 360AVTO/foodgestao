@@ -19,11 +19,14 @@ import { AtrasoPagamentoBanner } from "@/components/billing/AtrasoPagamentoBanne
 import { AcessoModulosBanner } from "@/components/billing/AcessoModulosBanner";
 import { CarenciaBanner } from "@/components/billing/CarenciaBanner";
 import { ParametrizacaoAvetoBarra } from "@/components/admin/concierge/ParametrizacaoAvetoBarra";
+import { AvisoAssinaturaDialog } from "@/components/billing/AvisoAssinaturaDialog";
+import { useAvisoAssinatura } from "@/hooks/useAvisoAssinatura";
 
 export function AppLayout() {
   useBillingRealtime();
   useLocation();
   const queryClient = useQueryClient();
+  const avisoAssinatura = useAvisoAssinatura();
 
   return (
     <SidebarProvider>
@@ -46,7 +49,8 @@ export function AppLayout() {
       </div>
       <MobileBottomNav />
       <InstallPrompt />
-      <MfaNudgeDialog />
+      <AvisoAssinaturaDialog {...avisoAssinatura} />
+      <MfaNudgeDialog pausado={avisoAssinatura.aberto} />
     </SidebarProvider>
   );
 }

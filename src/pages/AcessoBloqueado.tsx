@@ -8,6 +8,10 @@ import { useCompanyAccess, type MotivoBloqueio } from "@/hooks/useCompanyAccess"
 import { PageSpinner } from "@/components/PageSpinner";
 import { CoberturaOpcoes } from "@/components/billing/CoberturaOpcoes";
 import { useCompanyContext } from "@/hooks/useCompanyContext";
+import { AcoesAvisoAssinatura, AvisoAssinaturaDialog, SeloPlanoIndicado } from "@/components/billing/AvisoAssinaturaDialog";
+import { useAvisoAssinatura, useIndicacaoPessoas, useResumoAvisoAssinatura } from "@/hooks/useAvisoAssinatura";
+import { avisoDoModulo, textoAviso, tituloAviso } from "@/lib/billing/avisoAssinatura";
+import type { ModuleAccessV2 } from "@/hooks/useModuleAccess";
 
 /** Saída sempre visível: quem chega nesta tela nunca pode ficar sem para onde ir. */
 function VoltarAoHub() {
@@ -42,6 +46,35 @@ function AcoesSaida() {
     </div>
   );
 }
+
+/** Teste ou carência encerrados: data real, equipe, plano indicado e quem pode ativar. */
+function CartaoPeriodoEncerrado({ modulo, acesso }: { modulo: ModuloAcesso; acesso: ModuleAccessV2 }) {
+  const { selectedCompanyId } = useCompanyContext();
+  const aviso = avisoDoModulo(modulo, acesso);
+  const resumo = useResumoAvisoAssinatura(selectedCompanyId, !!aviso);
+  const indicacao = useIndicacaoPessoas(resumo.data?.colaboradores, resumo.data?.unidades, modulo === "pessoas" && !!resumo.data);
+  if (!aviso) return null;
+  return (
+    <Card className="border-destructive/40">
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-xl">
+          <AlertTriangle className="h-5 w-5 shrink-0 text-destructive" />
+          {MODULO_ROTULO[modulo]}: {tituloAviso(aviso)}
+        </CardTitle>
+        <CardDescription>{textoAviso(aviso, resumo.data?.empresa ?? null, resumo.data?.colaboradores)}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <SeloPlanoIndicado indicacao={indicacao} />
+        <AcoesAvisoAssinatura aviso={aviso} resumo={resumo.data ?? null} indicacao={indicacao} />
+        <p className="text-xs text-muted-foreground">
+          Após a confirmação do pagamento, o acesso é restabelecido — em até dois dias úteis, conforme a forma de pagamento.
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
+
+const ehPeriodoEncerrado = (motivo?: string | null) => motivo === "trial_expirado" || motivo === "carencia_expirada";
 
 const TEXTOS: Record<MotivoBloqueio, { titulo: string; descricao: string }> = {
   sem_assinatura: {
@@ -101,6 +134,8 @@ export default function AcessoBloqueado() {
   const { selectedCompanyId } = useCompanyContext();
   const modoV2 = v2.mode === "v2";
   const usarV2 = !!moduloParam && modoV2;
+  const aviso = useAvisoAssinatura();
+  const resumo = useResumoAvisoAssinatura(selectedCompanyId);
 
   if (legado.loading || v2.loading || ent.isLoading) return <PageSpinner />;
 
@@ -142,6 +177,7 @@ export default function AcessoBloqueado() {
           <VoltarAoHub />
           {mods.map((m) => {
             const motivo = ent.data?.[m]?.motivo ?? "sem_acesso";
+            if (ehPeriodoEncerrado(motivo)) return <CartaoPeriodoEncerrado key={m} modulo={m} acesso={ent.data![m]} />;
             return (
               <Card key={m} className="border-destructive/40">
                 <CardHeader>
@@ -163,12 +199,27 @@ export default function AcessoBloqueado() {
           <ExportMyDataCard />
           <AcoesSaida />
         </div>
+        <AvisoAssinaturaDialog {...aviso} />
       </div>
     );
   }
 
   const blocked = usarV2 ? v2.blocked : legado.blocked;
   if (!blocked) return <Navigate to="/hub" replace />;
+
+  if (usarV2 && moduloParam && v2.access && ehPeriodoEncerrado(v2.access.motivo)) {
+    return (
+      <div className="min-h-screen bg-background px-4 py-10">
+        <div className="mx-auto w-full max-w-2xl space-y-6">
+          <VoltarAoHub />
+          <CartaoPeriodoEncerrado modulo={moduloParam} acesso={v2.access} />
+          <ExportMyDataCard />
+          <AcoesSaida />
+        </div>
+        <AvisoAssinaturaDialog {...aviso} />
+      </div>
+    );
+  }
 
   const base = legado.access;
   const access = usarV2 && v2.access
@@ -245,10 +296,11 @@ export default function AcessoBloqueado() {
 
             {usarV2 && moduloParam && motivoBruto === "sem_cobertura" ? (
               <CoberturaOpcoes modulo={moduloParam} />
-            ) : access?.isOwner === false ? (
+            ) : !(access?.isOwner || resumo.data?.pode_contratar) ? (
               <p className="rounded-lg border bg-muted/40 p-4 text-sm">
-                A regularização do plano é feita pelo responsável pela empresa. Fale com ele para
-                liberar o acesso novamente.
+                A regularização do plano é feita pelo dono ou por um administrador da empresa
+                {resumo.data?.responsaveis?.length ? `: ${resumo.data.responsaveis.join(", ")}` : ""}. Fale com
+                essa pessoa para liberar o acesso novamente.
               </p>
             ) : (
             <div className="flex flex-wrap gap-2">

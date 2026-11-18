@@ -18830,6 +18830,7 @@ export type Database = {
         Args: { _account_id: string }
         Returns: boolean
       }
+      billing_aviso_assinatura: { Args: { _company_id: string }; Returns: Json }
       billing_dunning_historico: {
         Args: { _busca?: string; _limite?: number; _status?: string }
         Returns: {

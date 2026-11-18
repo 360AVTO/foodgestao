@@ -18,7 +18,7 @@ import { useMfaNudge } from "@/hooks/useMfaNudge";
  * Pop-up informativo e opcional: convida a ativar a verificação em duas
  * etapas e leva para a página de ativação. Não bloqueia nada.
  */
-export function MfaNudgeDialog() {
+export function MfaNudgeDialog({ pausado = false }: { pausado?: boolean } = {}) {
   const { mostrar, fechar } = useMfaNudge();
   const [naoMostrar, setNaoMostrar] = useState(false);
   const navigate = useNavigate();
@@ -34,7 +34,7 @@ export function MfaNudgeDialog() {
 
   return (
     <Dialog
-      open={mostrar}
+      open={mostrar && !pausado}
       onOpenChange={(aberto) => {
         if (!aberto) void encerrar();
       }}

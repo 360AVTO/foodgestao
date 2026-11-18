@@ -1737,6 +1737,13 @@
       "when": 1795006130640,
       "tag": "0247_reta_final_teste_d3_d0",
       "breakpoints": true
+    },
+    {
+      "idx": 248,
+      "version": "7",
+      "when": 1795008492893,
+      "tag": "0248_aviso_fim_teste_gestores",
+      "breakpoints": true
     }
   ]
 }
