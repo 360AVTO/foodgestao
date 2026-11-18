@@ -46,12 +46,14 @@ Deno.serve(async (req) => {
     if (b.acao === "listar") {
       const { data: cfg } = await admin.from("system_parameters").select("value,updated_at").eq("key", "nfse_config").maybeSingle();
       const { data, error } = await admin.from("billing_v2_nfse_solicitacoes")
-        .select("id,status,valor_cents,asaas_invoice_id,resposta,created_at,invoices:invoice_id(billing_account_id,billing_accounts:billing_account_id(nome))")
+        .select("id,status,valor_cents,asaas_invoice_id,resposta,created_at,invoices:invoice_id(billing_account_id,fiscal_invoice_pdf_url,fiscal_invoice_number,billing_accounts:billing_account_id(nome))")
         .eq("asaas_env", "production").order("created_at", { ascending: false }).limit(20);
       if (error) return json({ error: error.message }, 500);
       return json({ config: (cfg as any)?.value ?? null, config_atualizada_em: (cfg as any)?.updated_at ?? null, itens: (data ?? []).map((r: any) => ({
         id: r.id, status: r.status, valor_cents: r.valor_cents, asaas_invoice_id: r.asaas_invoice_id, created_at: r.created_at,
-        conta: r.invoices?.billing_accounts?.nome ?? null, erro: r.resposta?.erro ?? null,
+        conta: r.invoices?.billing_accounts?.nome ?? null,
+        pdf_url: r.status === "emitida" ? r.invoices?.fiscal_invoice_pdf_url ?? null : null,
+        numero: r.status === "emitida" ? r.invoices?.fiscal_invoice_number ?? null : null, erro: r.resposta?.erro ?? null,
         tentativas: Array.isArray(r.resposta?.tentativas_anteriores) ? r.resposta.tentativas_anteriores.length + 1 : 1,
       })) });
     }

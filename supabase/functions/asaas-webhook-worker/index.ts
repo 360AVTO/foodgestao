@@ -214,6 +214,21 @@ async function processEvent(admin: Admin, env: Env, eventType: string, payload: 
         .eq("external_invoice_id", String(paymentId));
       if (fiscalErr) throw new Error(`fiscal_update: ${fiscalErr.message}`);
     }
+    // Resultado final do portal reflete na solicitação (recusada pode ser reenviada pelo super admin).
+    const final = eventType === "INVOICE_AUTHORIZED" ? "emitida" : eventType === "INVOICE_ERROR" ? "recusada_asaas"
+      : eventType === "INVOICE_CANCELED" ? "cancelada" : null;
+    if (final) {
+      const { data: sol } = await admin.from("billing_v2_nfse_solicitacoes").select("id,resposta")
+        .eq("asaas_env", "production").eq("asaas_invoice_id", String(fiscal.id)).maybeSingle();
+      if (sol) {
+        const resposta = final === "recusada_asaas"
+          ? { ...((sol as any).resposta ?? {}), erro: String(fiscal.statusDescription ?? "Nota recusada pelo portal emissor.").trim() }
+          : (sol as any).resposta;
+        const { error: solErr } = await admin.from("billing_v2_nfse_solicitacoes")
+          .update({ status: final, resposta }).eq("id", (sol as any).id);
+        if (solErr) throw new Error(`nfse_solicitacao_update: ${solErr.message}`);
+      }
+    }
     return;
   }
 

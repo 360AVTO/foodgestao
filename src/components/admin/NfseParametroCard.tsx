@@ -12,10 +12,12 @@ import { toast } from "sonner";
 import { RefreshCw } from "lucide-react";
 
 type Config = { codigo_servico: string; nome_servico: string; descricao: string; iss: number };
-type Item = { id: string; status: string; valor_cents: number; asaas_invoice_id: string | null; created_at: string; conta: string | null; erro: string | null; tentativas: number };
+type Item = { id: string; status: string; valor_cents: number; asaas_invoice_id: string | null; created_at: string; conta: string | null; erro: string | null; tentativas: number; pdf_url?: string | null; numero?: string | null };
 
 const STATUS: Record<string, { rotulo: string; variante: "default" | "secondary" | "destructive" | "outline" }> = {
-  solicitada: { rotulo: "Enviada ao Asaas", variante: "default" },
+  solicitada: { rotulo: "Aguardando portal", variante: "outline" },
+  emitida: { rotulo: "Emitida", variante: "default" },
+  cancelada: { rotulo: "Cancelada", variante: "secondary" },
   automatica_assinatura: { rotulo: "Automática", variante: "default" },
   recusada_asaas: { rotulo: "Recusada", variante: "destructive" },
   nao_emitida_valor_zero: { rotulo: "Valor zero", variante: "secondary" },
@@ -133,6 +135,11 @@ export function NfseParametroCard() {
                   <p className="text-xs text-muted-foreground">
                     {new Date(it.created_at).toLocaleString("pt-BR")}{it.tentativas > 1 ? ` · ${it.tentativas} tentativas` : ""}
                   </p>
+                  {it.status === "emitida" && it.pdf_url && (
+                    <a href={it.pdf_url} target="_blank" rel="noreferrer" className="text-xs font-medium text-primary underline">
+                      Abrir nota{it.numero ? ` nº ${it.numero}` : ""}
+                    </a>
+                  )}
                   {it.status === "recusada_asaas" && it.erro && <p className="text-xs text-destructive break-words">{it.erro}</p>}
                   {it.status === "recusada_asaas" && (
                     <Button size="sm" variant="outline" disabled={reenviar.isPending} onClick={() => reenviar.mutate(it.id)}>
