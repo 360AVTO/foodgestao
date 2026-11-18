@@ -11,6 +11,7 @@ import { CnpjInput } from "@/components/shared/CnpjInput";
 import { EnderecoFields, type EnderecoValor } from "@/components/shared/EnderecoFields";
 import { maskCep } from "@/lib/endereco";
 import { parseEnderecoTexto } from "@/lib/dp/ficha-registro/endereco-parse";
+import { CAMPOS_ENDERECO_OBRIGATORIOS, errosEndereco } from "@/lib/empresa/enderecoObrigatorio";
 import type { CnpjLookupResult } from "@/hooks/useCnpjLookup";
 import { isValidCnpj } from "@/lib/cnpj";
 import { ContatosEmpresaCampos } from "@/components/companies/ContatosEmpresaCampos";
@@ -42,6 +43,7 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
   const [phone, setPhone] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [endereco, setEndereco] = useState<EnderecoValor>({});
+  const [errosEnd, setErrosEnd] = useState<Record<string, string>>({});
   const [contatos, setContatos] = useState<ContatosEmpresaForm>(CONTATOS_VAZIOS);
   const [errosContato, setErrosContato] = useState<Partial<Record<CampoContato, string>>>({});
   // WhatsApp do financeiro fica na conta de cobrança (mesmo campo de Minha Assinatura).
@@ -142,6 +144,16 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
         return;
       }
     }
+
+    // Endereço completo é obrigatório: vai para o cadastro do pagador e para a nota fiscal.
+    const errEnd = errosEndereco(endereco);
+    if (Object.keys(errEnd).length) {
+      setErrosEnd(errEnd);
+      toast.error("Complete o endereço da empresa", { description: "Ele é usado na cobrança e na nota fiscal." });
+      document.getElementById(`company-${Object.keys(errEnd)[0]}`)?.focus();
+      return;
+    }
+    setErrosEnd({});
 
     const validated = validateWithToast(companySchema, {
       name,
@@ -279,11 +291,22 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
                 </div>
               </div>
               <div className="space-y-2">
-                <Label>Endereço</Label>
+                <Label>Endereço *</Label>
+                <p className="text-xs text-muted-foreground">Usado na cobrança e na nota fiscal.</p>
                 <EnderecoFields
                   idPrefix="company"
                   valor={endereco}
-                  onChange={(patch) => setEndereco((e) => ({ ...e, ...patch }))}
+                  obrigatorios={CAMPOS_ENDERECO_OBRIGATORIOS}
+                  erros={errosEnd}
+                  onChange={(patch) => {
+                    setEndereco((e) => ({ ...e, ...patch }));
+                    setErrosEnd((er) => {
+                      const n = { ...er };
+                      for (const k of Object.keys(patch)) delete n[k];
+                      if ("cep" in patch) delete n.uf;
+                      return n;
+                    });
+                  }}
                 />
               </div>
               <ContatosEmpresaCampos

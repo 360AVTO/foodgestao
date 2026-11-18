@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { enderecoAsaas, enderecoDaReceita, escolherEndereco } from "./billing-endereco.ts";
+import { enderecoAsaas, enderecoDaReceita, escolherEndereco, telefonesAsaas } from "./billing-endereco.ts";
 
 const aveto = { cnpj: "12.345.678/0001-90", cep: "74367-633", logradouro: "Avenida Ravena", numero: "201", complemento: "Ap. 1204", bairro: "Residencial Eldorado", cidade: "GOIÂNIA", uf: "GO" };
 
@@ -26,4 +26,10 @@ Deno.test("endereço oficial da Receita completa o cliente quando o cadastro est
   assertEquals(enderecoAsaas(enderecoDaReceita(receita, "06002178000158")), { postalCode: "74932260", address: "9 A", addressNumber: "S/N", province: "SETOR GARAVELO", complement: "QUADRA10 LOTE 03" });
   assertEquals(enderecoDaReceita(null, "06002178000158"), null);
   assertEquals(enderecoAsaas(enderecoDaReceita({ logradouro: "9 A" }, "06002178000158")), null);
+});
+
+Deno.test("telefones: WhatsApp/celular vai em mobilePhone, fixo em phone, sem o 55", () => {
+  assertEquals(telefonesAsaas({ whatsapp: "+55 (62) 99236-5959", phone: "(62) 3333-4444" }), { mobilePhone: "62992365959", phone: "6233334444" });
+  assertEquals(telefonesAsaas({ phone: "62992365959" }), { mobilePhone: "62992365959" });
+  assertEquals(telefonesAsaas({ phone: "123", whatsapp: null }), {});
 });

@@ -97,12 +97,59 @@ export async function enderecoDaConta(admin: SupabaseClient, contaId: string, do
   return await enderecoReceita(admin, doc);
 }
 
-/** Grava o endereço no cliente do Asaas. Retorna false quando o cadastro da empresa está incompleto. */
+export type TelefonesAsaas = { phone?: string; mobilePhone?: string };
+
+/** Telefone brasileiro só com DDD + número (10 fixo / 11 celular); tira o 55 do país. */
+function foneBr(v: string | null | undefined): string | null {
+  let d = digitos(v);
+  if ((d.length === 12 || d.length === 13) && d.startsWith("55")) d = d.slice(2);
+  return d.length === 10 || d.length === 11 ? d : null;
+}
+
+/** Telefones da empresa para o cliente do Asaas: WhatsApp/celular em mobilePhone, fixo em phone. */
+export function telefonesAsaas(e: { phone?: string | null; whatsapp?: string | null } | null | undefined): TelefonesAsaas {
+  if (!e) return {};
+  const out: TelefonesAsaas = {};
+  const wa = foneBr(e.whatsapp), tel = foneBr(e.phone);
+  const celular = [wa, tel].find((f) => f && f.length === 11);
+  if (celular) out.mobilePhone = celular;
+  const fixo = tel && tel !== celular ? tel : (wa && wa !== celular ? wa : null);
+  if (fixo) out.phone = fixo;
+  return out;
+}
+
+/** Telefones da empresa da conta de cobrança, preferindo a do CNPJ do pagador. */
+export async function telefonesDaConta(admin: SupabaseClient, contaId: string, documentoPagador: string | null | undefined): Promise<TelefonesAsaas> {
+  const { data } = await admin.from("billing_account_companies")
+    .select("companies:company_id(cnpj,phone,whatsapp)")
+    .eq("billing_account_id", contaId).is("removed_at", null);
+  const empresas = (data ?? []).map((r: any) => r.companies).filter(Boolean) as { cnpj?: string; phone?: string; whatsapp?: string }[];
+  const doc = digitos(documentoPagador);
+  const ordem = [...empresas.filter((e) => doc && digitos(e.cnpj) === doc), ...empresas.filter((e) => !doc || digitos(e.cnpj) !== doc)];
+  for (const e of ordem) {
+    const t = telefonesAsaas(e);
+    if (t.mobilePhone || t.phone) return t;
+  }
+  return {};
+}
+
+/**
+ * Grava endereço e telefones no cliente do Asaas (o Asaas deduz cidade/UF pelo CEP).
+ * Retorna false quando não há endereço completo em nenhuma fonte.
+ */
 export async function sincronizarEnderecoCliente(
   admin: SupabaseClient, contaId: string, customerId: string, documentoPagador: string | null | undefined, env: AsaasEnv,
 ): Promise<boolean> {
-  const end = await enderecoDaConta(admin, contaId, documentoPagador);
-  if (!end) return false;
-  await asaasFetch(`/customers/${customerId}`, { method: "POST", body: JSON.stringify(end) }, env);
+  const [end, tel] = await Promise.all([
+    enderecoDaConta(admin, contaId, documentoPagador),
+    telefonesDaConta(admin, contaId, documentoPagador).catch(() => ({} as TelefonesAsaas)),
+  ]);
+  if (!end) {
+    if (tel.mobilePhone || tel.phone) {
+      await asaasFetch(`/customers/${customerId}`, { method: "POST", body: JSON.stringify(tel) }, env).catch(() => {});
+    }
+    return false;
+  }
+  await asaasFetch(`/customers/${customerId}`, { method: "POST", body: JSON.stringify({ ...end, ...tel }) }, env);
   return true;
 }

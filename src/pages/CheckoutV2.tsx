@@ -18,6 +18,7 @@ import { useEnterpriseElegibilidade } from "@/hooks/useEnterpriseElegibilidade";
 import { cn } from "@/lib/utils";
 import { resumoDescontoNegociado, type DescontoNegociadoInfo } from "@/lib/billing/descontoNegociado";
 import { toast } from "sonner";
+import { enderecoCompleto } from "@/lib/empresa/enderecoObrigatorio";
 import { AlertTriangle, Check, MessageCircle } from "lucide-react";
 
 type Modulo = "financeiro" | "pessoas";
@@ -142,6 +143,17 @@ export default function CheckoutV2() {
       setEmail((e) => e || conta.data!.email_cobranca || "");
     }
   }, [conta.data]);
+
+  // Endereço da empresa tomadora: vai para o cadastro do pagador e para a nota fiscal.
+  const enderecoEmpresa = useQuery({
+    queryKey: ["checkout-v2-endereco", companyId],
+    enabled: !!companyId,
+    queryFn: async () => {
+      const { data } = await supabase.from("companies").select("cep,logradouro,numero,bairro,cidade,uf").eq("id", companyId!).maybeSingle();
+      return data;
+    },
+  });
+  const enderecoIncompleto = enderecoEmpresa.isSuccess && !enderecoCompleto(enderecoEmpresa.data);
 
   const nfse = useQuery({
     queryKey: ["checkout-v2-nfse"],
@@ -448,6 +460,15 @@ export default function CheckoutV2() {
                   <Input id="email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} disabled={emailTravado} />
                 </div>
               </div>
+              {enderecoIncompleto && (
+                <Alert data-testid="aviso-endereco-incompleto">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertDescription>
+                    O endereço de {empresaNome ?? "sua empresa"} está incompleto. Ele vai na cobrança e na nota fiscal.{" "}
+                    <Link to="/empresas" className="font-medium text-primary underline">Completar endereço</Link>
+                  </AlertDescription>
+                </Alert>
+              )}
               {docTravado && emailTravado && <p className="text-xs text-muted-foreground">Pagador já cadastrado nesta conta de cobrança.</p>}
               {conta.data.asaas_customer_id && (!docTravado || !emailTravado) && <p className="text-xs text-muted-foreground">Complete os dados do pagador. Eles serão conferidos com o cadastro de cobrança existente.</p>}
             </Passo>

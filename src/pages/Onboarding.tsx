@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { errosEndereco } from "@/lib/empresa/enderecoObrigatorio";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -94,6 +95,10 @@ function validateEmpresa(d: EmpresaFormData): Partial<Record<keyof EmpresaFormDa
   if (!d.bairro.trim()) e.bairro = "Informe o bairro.";
   if (!d.cidade.trim()) e.cidade = "Informe a cidade.";
   if (!d.uf.trim() || d.uf.length !== 2) e.uf = "UF inválida.";
+  // Mesma regra dos cadastros de empresa/unidade (CEP com 8 números e UF do CEP).
+  const endErr = errosEndereco(d);
+  if (!e.cep && endErr.cep) e.cep = endErr.cep;
+  if (!e.uf && endErr.uf) e.uf = endErr.uf;
   if (!d.whatsappEmpresa.trim()) e.whatsappEmpresa = "Informe o WhatsApp.";
   else if (!isValidPhone(d.whatsappEmpresa)) e.whatsappEmpresa = "WhatsApp inválido.";
   if (d.telefoneEmpresa && !isValidPhone(d.telefoneEmpresa)) e.telefoneEmpresa = "Telefone inválido.";

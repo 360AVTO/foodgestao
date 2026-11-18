@@ -4,7 +4,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { asaasFetch, parseAsaasEnv, requireAsaasId, type AsaasEnv } from "./asaas.ts";
 import { hojeBrasilia, janelaDesconto } from "./billing-desconto-negociado.ts";
-import { enderecoDaConta } from "./billing-endereco.ts";
+import { enderecoDaConta, sincronizarEnderecoCliente, telefonesDaConta } from "./billing-endereco.ts";
 
 export type Ciclo = "mensal" | "anual";
 export type Forma = "pix" | "boleto" | "cartao";
@@ -54,7 +54,16 @@ export async function assertClienteExclusivo(admin: SupabaseClient, conta: Conta
 }
 
 export async function garantirCliente(admin: SupabaseClient, conta: Conta, email: string): Promise<string> {
-  if (conta.asaas_customer_id) return conta.asaas_customer_id;
+  if (conta.asaas_customer_id) {
+    // Cliente já existe no Asaas: atualiza endereço e telefones do cadastro antes de cobrar
+    // (exigidos na nota fiscal). Falha aqui nunca impede a contratação.
+    try {
+      await sincronizarEnderecoCliente(admin, conta.id, conta.asaas_customer_id, conta.documento_pagador, conta.asaas_env);
+    } catch (e) {
+      console.warn("[billing-v2] endereço do cliente não atualizado", conta.id, (e as Error).message);
+    }
+    return conta.asaas_customer_id;
+  }
   const doc = (conta.documento_pagador ?? "").replace(/\D/g, "");
   if (!doc) throw new BillingError(422, "Informe o CNPJ/CPF do pagador antes de contratar.");
   // Se o Asaas já tem cliente com este documento ligado a outra conta, aborta sem criar nada.
@@ -67,10 +76,13 @@ export async function garantirCliente(admin: SupabaseClient, conta: Conta, email
     }
   }
   // Endereço do cadastro da empresa: exigido pelo Asaas para emitir a NFS-e.
-  const endereco = await enderecoDaConta(admin, conta.id, doc);
+  const [endereco, telefones] = await Promise.all([
+    enderecoDaConta(admin, conta.id, doc),
+    telefonesDaConta(admin, conta.id, doc).catch(() => ({})),
+  ]);
   const c = await asaasFetch("/customers", {
     method: "POST",
-    body: JSON.stringify({ name: conta.nome, cpfCnpj: doc, email: conta.email_cobranca ?? email, externalReference: conta.id, notificationDisabled: true, ...(endereco ?? {}) }),
+    body: JSON.stringify({ name: conta.nome, cpfCnpj: doc, email: conta.email_cobranca ?? email, externalReference: conta.id, notificationDisabled: true, ...(endereco ?? {}), ...telefones }),
   }, conta.asaas_env);
   const id = requireAsaasId(c, "o cliente");
   await assertClienteExclusivo(admin, conta, id);

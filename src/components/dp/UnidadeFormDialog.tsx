@@ -21,6 +21,7 @@ import { UnidadeFeriadosPanel } from "@/components/dp/unidades/UnidadeFeriadosPa
 import { EnderecoFields } from "@/components/shared/EnderecoFields";
 import { maskCep } from "@/lib/endereco";
 import { parseEnderecoTexto } from "@/lib/dp/ficha-registro/endereco-parse";
+import { CAMPOS_ENDERECO_OBRIGATORIOS, errosEndereco } from "@/lib/empresa/enderecoObrigatorio";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -132,6 +133,7 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
   const upsert = useUpsertDpUnidade();
   const qc = useQueryClient();
   const [form, setForm] = useState(blank);
+  const [errosEnd, setErrosEnd] = useState<Record<string, string>>({});
   const [loadingBrasilApi, setLoadingBrasilApi] = useState(false);
 
   const applyCompanyData = async (companyId: string, force = false) => {
@@ -336,6 +338,15 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
       toast.error("Nome é obrigatório");
       return;
     }
+    const errEnd = errosEndereco(form);
+    if (Object.keys(errEnd).length) {
+      setAba("dados");
+      setErrosEnd(errEnd);
+      toast.error("Complete o endereço da unidade", { description: "CEP, rua, número, bairro, cidade e estado são obrigatórios." });
+      setTimeout(() => document.getElementById(`unidade-${Object.keys(errEnd)[0]}`)?.focus(), 50);
+      return;
+    }
+    setErrosEnd({});
     if (compensacaoAtiva && !form.ciencia_sindical) {
       toast.error("Confirme a negociação com o sindicato", {
         description: "Banco de horas e compensação de feriados precisam estar previstos na convenção ou acordo coletivo. Marque a confirmação para salvar.",
@@ -550,9 +561,11 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
             />
           </div>
           <div className="space-y-2">
-            <Label>Endereço</Label>
+            <Label>Endereço *</Label>
             <EnderecoFields
               idPrefix="unidade"
+              obrigatorios={CAMPOS_ENDERECO_OBRIGATORIOS}
+              erros={errosEnd}
               valor={{
                 cep: form.cep,
                 logradouro: form.logradouro,
@@ -562,7 +575,15 @@ export function UnidadeFormDialog({ open, onOpenChange, unidade = null, nomeInic
                 cidade: form.cidade,
                 uf: form.uf,
               }}
-              onChange={(patch) => setForm((f) => ({ ...f, ...patch }))}
+              onChange={(patch) => {
+                setForm((f) => ({ ...f, ...patch }));
+                setErrosEnd((er) => {
+                  const n = { ...er };
+                  for (const k of Object.keys(patch)) delete n[k];
+                  if ("cep" in patch) delete n.uf;
+                  return n;
+                });
+              }}
             />
           </div>
           <div className="space-y-2">
