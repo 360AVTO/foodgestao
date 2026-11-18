@@ -19,7 +19,7 @@ import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { sendTemplateEmail } from "../_shared/transactional-email-templates/send-email.ts";
 import { STAGE_NUMERO } from "../_shared/transactional-email-templates/billing-copy.ts";
 import {
-  mensagemWhatsapp, proximoEnvioWhatsapp, validadeWhatsapp,
+  mensagemWhatsapp, proximoEnvioAvulso, proximoEnvioWhatsapp, validadeWhatsapp,
 } from "../_shared/billing-whatsapp.ts";
 import { destinosWhatsappCobranca, whatsappReguaAtivo } from "../_shared/billing-whatsapp-envio.ts";
 import {
@@ -493,7 +493,9 @@ Deno.serve(async (req) => {
           await cancelar(item.id, "fora do prazo do aviso (o e-mail já foi enviado)");
           continue;
         }
-        const quando = proximoEnvioWhatsapp(item.stage, new Date());
+        const quando = payload.avulso === true
+          ? proximoEnvioAvulso(new Date())
+          : proximoEnvioWhatsapp(item.stage, new Date());
         if (quando.getTime() > Date.now()) {
           await admin.from("billing_notifications")
             .update({ scheduled_at: quando.toISOString() }).eq("id", item.id);

@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  destinosWhatsapp, ESTAGIOS_WHATSAPP, mensagemWhatsapp, proximoEnvioWhatsapp, validadeWhatsapp,
+  destinosWhatsapp, ESTAGIOS_WHATSAPP, mensagemWhatsapp, proximoEnvioAvulso, proximoEnvioWhatsapp, validadeWhatsapp,
 } from "./billing-whatsapp.ts";
 
 // Horários em Brasília (UTC-3)
@@ -135,4 +135,10 @@ Deno.test("financeiro recebe com o próprio nome e proprietário com o mesmo nú
   assertEquals(r.map((x) => [x.nome, x.papel]), [["Rafael", "proprietario"]]);
   const so = destinosWhatsapp({ telefone: null }, { telefone: "64992168514", nome: "Maria" });
   assertEquals(so.map((x) => [x.nome, x.papel]), [["Maria", "financeiro"]]);
+});
+
+Deno.test("envio avulso sai às 17h50 (fora da janela comercial), mas não depois das 20h", () => {
+  const tarde = brt("2026-11-18T17:50:00");
+  assertEquals(proximoEnvioAvulso(tarde).getTime(), tarde.getTime());
+  assertEquals(proximoEnvioAvulso(brt("2026-11-18T21:00:00")).toISOString(), brt("2026-11-19T08:00:00").toISOString());
 });

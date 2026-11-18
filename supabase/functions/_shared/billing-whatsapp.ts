@@ -85,6 +85,14 @@ export function proximoEnvioWhatsapp(stage: string, agora: Date): Date {
   return agora;
 }
 
+/**
+ * Envio avulso autorizado pelo super admin (ex.: antecipar um aviso a pedido do cliente):
+ * sai fora da janela comercial, mas só em horário civil (8h–20h, Brasília).
+ */
+export function proximoEnvioAvulso(agora: Date): Date {
+  return proximoEnvioWhatsapp("reativacao", agora);
+}
+
 /** Até quando o aviso faz sentido: mesmo dia (Brasília) ou 3 dias para os adiáveis. */
 export function validadeWhatsapp(stage: string, criadoEm: Date): Date {
   if (ADIAVEIS.has(stage)) return new Date(criadoEm.getTime() + 3 * 24 * 3600 * 1000);
