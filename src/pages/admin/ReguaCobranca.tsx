@@ -20,6 +20,7 @@ import {
 import { RefreshCw, PauseCircle, PlayCircle, Mail, MessageCircle } from "lucide-react";
 import { Switch } from "@/components/ui/switch";
 import { formatarWhatsapp } from "@/lib/billing/whatsappCobranca";
+import { RetaFinalTestesCard } from "@/components/admin/RetaFinalTestesCard";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
 
@@ -58,8 +59,8 @@ const ESTAGIOS: Record<string, string> = {
   d_mais_80: "D+80 · Aviso de expiração",
   d_mais_90: "D+90 · Expiração",
   reativacao: "Pagamento · Reativação",
-  trial_d5: "Trial D5 · Termina em 2 dias",
-  trial_d7: "Trial D7 · Encerrado",
+  trial_d5: "Teste · Faltam 3 dias",
+  trial_d7: "Teste · Último dia",
   trial_pos_1: "Pós-teste D+1 · Tentativa 1",
   trial_pos_4: "Pós-teste D+4 · Tentativa 2",
   trial_pos_8: "Pós-teste D+8 · Tentativa 3",
@@ -262,6 +263,8 @@ export default function AdminReguaCobranca() {
           </CardContent>
         </Card>
       </div>
+
+      <RetaFinalTestesCard />
 
       <Card>
         <CardHeader className="flex flex-col gap-3 space-y-0 sm:flex-row sm:items-center sm:justify-between">

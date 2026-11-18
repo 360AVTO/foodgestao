@@ -95,11 +95,13 @@ export function trechoIndicacao(d: DadosIndicacao, negrito = false): string | nu
   if (d.indicacao === "plano" && d.plano && typeof d.colaboradores === "number") {
     return `Hoje a empresa tem ${b(colab(d.colaboradores))} cadastrados. Para esse tamanho de equipe, o plano indicado é o ${b(d.plano)}${d.detalhePlano ? ` (${d.detalhePlano})` : ""}. O valor final é confirmado na contratação.`;
   }
+  // No WhatsApp a equipe Aveto atende a resposta na própria conversa.
+  const contato = negrito ? "é só responder esta mensagem" : "fale com nosso atendimento";
   if (d.indicacao === "sob_consulta" && typeof d.colaboradores === "number") {
-    return `Hoje a empresa tem ${b(colab(d.colaboradores))} cadastrados. Para a estrutura da sua empresa, preparamos uma proposta sob medida: fale com nosso atendimento.`;
+    return `Hoje a empresa tem ${b(colab(d.colaboradores))} cadastrados. Para a estrutura da sua empresa, preparamos uma proposta sob medida: ${contato}.`;
   }
   if (d.indicacao === "sem_equipe") {
-    return "Ainda não há colaboradores cadastrados. Se quiser ajuda para trazer a sua equipe para o sistema, fale com nosso atendimento.";
+    return `Ainda não há colaboradores cadastrados. Se quiser ajuda para trazer a sua equipe para o sistema, ${contato}.`;
   }
   return null;
 }

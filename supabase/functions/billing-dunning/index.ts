@@ -176,6 +176,10 @@ Deno.serve(async (req) => {
       linkExportacao: `${SITE_URL}/acesso-bloqueado`,
       linkPlanos: `${SITE_URL}/planos`,
       modulo: nomeModulo(row.modulo),
+      // reta final do teste: dias que realmente faltam (o aviso pode ser antecipado no fim de semana)
+      ...(row.stage === "trial_d5" || row.stage === "trial_d7"
+        ? { diasRestantes: Math.max(0, -(row.dias ?? 0)) }
+        : {}),
     };
   }
 

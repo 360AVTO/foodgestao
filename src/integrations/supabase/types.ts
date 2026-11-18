@@ -18903,6 +18903,23 @@ export type Database = {
           subscription_id: string
         }[]
       }
+      billing_regua_reta_final: {
+        Args: { _dias?: number }
+        Returns: {
+          aviso_enviado_em: string
+          colaboradores: number
+          company_id: string
+          contato_nome: string
+          contato_telefone: string
+          dias_restantes: number
+          empresa: string
+          modulo: string
+          subscription_id: string
+          trial_ends_at: string
+          ultimo_dia_enviado_em: string
+          unidades: number
+        }[]
+      }
       billing_regua_whatsapp_definir: {
         Args: { _ativo: boolean }
         Returns: Json

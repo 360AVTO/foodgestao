@@ -49,7 +49,7 @@ Deno.test("sem colaboradores ativos não indica plano nem preço", () => {
 
 Deno.test("lembrete do teste cita a equipe real e o plano indicado no WhatsApp e no e-mail", () => {
   const d = { empresa: "Rancho 330", indicacao: "plano" as const, colaboradores: 47, plano: "Pessoas 360° Enterprise", detalhePlano: "R$ 10,00 por colaborador ativo, hoje cerca de R$ 470,00/mês" };
-  for (const stage of ["trial_d5", "trial_d7", "trial_pos_1", "trial_pos_4", "trial_pos_8", "grace_d_menos_3", "grace_d0"]) {
+  for (const stage of ["trial_d5", "trial_pos_1", "trial_pos_4", "trial_pos_8", "grace_d_menos_3", "grace_d0"]) {
     const wa = mensagemWhatsapp(stage, d)!;
     assert(wa.includes("*47 colaboradores ativos*"), stage);
     assert(wa.includes("*Pessoas 360° Enterprise*"), stage);
@@ -61,4 +61,53 @@ Deno.test("sem indicação o lembrete continua sem citar equipe nem plano", () =
   const wa = mensagemWhatsapp("trial_d5", { empresa: "X" })!;
   assert(!wa.includes("colaboradores ativos"));
   assert(!wa.includes("plano indicado"));
+});
+
+// ---------- reta final do teste: 3 dias antes e último dia ----------
+const RANCHO = {
+  nome: "Gabriel", empresa: "Rancho 330", indicacao: "plano" as const, colaboradores: 47,
+  plano: "Pessoas 360° Enterprise", detalhePlano: "R$ 10,00 por colaborador ativo, hoje cerca de R$ 470,00/mês",
+  linkPlanos: "https://www.aveto360.com/planos?plano=pessoas-enterprise",
+};
+
+Deno.test("aviso de 3 dias: equipe, plano indicado, link direto e resposta na própria conversa", () => {
+  const wa = mensagemWhatsapp("trial_d5", { ...RANCHO, diasRestantes: 3, data: "19/11/2026" })!;
+  assert(wa.includes("encerra em 3 dias (19/11)"));
+  assert(wa.includes("*47 colaboradores ativos*"));
+  assert(wa.includes("*Pessoas 360° Enterprise*"));
+  assert(wa.includes("👉 https://www.aveto360.com/planos?plano=pessoas-enterprise"));
+  assert(wa.includes("seguir com a implantação na sua operação, é só responder esta mensagem"));
+  assert(!wa.includes("wa.me"));
+});
+
+Deno.test("último dia: aviso de hoje com o plano indicado e o link direto", () => {
+  const wa = mensagemWhatsapp("trial_d7", { ...RANCHO, diasRestantes: 0, data: "19/11/2026" })!;
+  assert(wa.includes("Hoje é o último dia do teste gratuito da *Rancho 330*"));
+  assert(wa.includes("ative o plano *Pessoas 360° Enterprise*"));
+  assert(wa.includes("👉 https://www.aveto360.com/planos?plano=pessoas-enterprise"));
+  assert(!wa.includes("wa.me"));
+  const mail = billingCopy("trial_d7", { ...RANCHO, diasRestantes: 0 });
+  assertEquals(mail.subject, "Hoje é o último dia do seu teste do Aveto 360");
+});
+
+Deno.test("último dia no fim de semana sai na sexta dizendo quando encerra", () => {
+  const wa = mensagemWhatsapp("trial_d7", { ...RANCHO, diasRestantes: 1, data: "21/11/2026" })!;
+  assert(wa.includes("encerra amanhã, sábado (21/11)"));
+  assert(!wa.includes("Hoje é o último dia"));
+});
+
+Deno.test("reta final sob consulta não mostra preço e pede resposta na conversa", () => {
+  const d = { empresa: "Rede X", indicacao: "sob_consulta" as const, colaboradores: 18, linkPlanos: "https://www.aveto360.com/planos" };
+  for (const stage of ["trial_d5", "trial_d7"]) {
+    const wa = mensagemWhatsapp(stage, { ...d, diasRestantes: stage === "trial_d5" ? 3 : 0 })!;
+    assert(!wa.includes("R$"), stage);
+    assert(wa.includes("é só responder esta mensagem"), stage);
+  }
+});
+
+Deno.test("nenhum WhatsApp da régua manda o cliente para outro número", () => {
+  for (const s of ["trial_d5", "trial_d7", "trial_pos_1", "trial_pos_4", "trial_pos_8", "oferta_plano", "cortesia_encerrada",
+    "grace_d_menos_3", "grace_d_menos_1", "grace_d0", "d_mais_1", "d_mais_5", "d_mais_10", "d_mais_20", "d_mais_28"]) {
+    assert(!mensagemWhatsapp(s, { ...RANCHO, diasRestantes: 3 })!.includes("wa.me"), s);
+  }
 });

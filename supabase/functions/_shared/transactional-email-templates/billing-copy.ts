@@ -1,6 +1,7 @@
 // Textos oficiais da régua de cobrança e do trial — AVETO 360.
 // Tom cordial e objetivo, sem ameaça nem exposição (art. 42 do CDC).
 import { trechoIndicacao, type DadosIndicacao } from '../billing-plano-indicado.ts'
+import { prazoDoTeste } from '../billing-prazo-teste.ts'
 
 export interface BillingCopyData extends DadosIndicacao {
   nome?: string
@@ -16,6 +17,8 @@ export interface BillingCopyData extends DadosIndicacao {
   linkExportacao?: string
   linkPlanos?: string
   modulo?: string
+  /** Dias que faltam para o fim do teste (avisos da reta final). */
+  diasRestantes?: number
 }
 
 export interface BillingCopy {
@@ -32,6 +35,8 @@ const nome = (d: BillingCopyData) => d.nome || 'tudo bem'
 const empresa = (d: BillingCopyData) => d.empresa || 'sua empresa'
 const modulo = (d: BillingCopyData) => (d.modulo ? ` do ${d.modulo}` : '')
 const valor = (d: BillingCopyData) => d.valor || 'em aberto'
+const APOIO_EMAIL =
+  'Se quiser tirar dúvidas ou precisar do apoio da nossa equipe para seguir com a implantação na sua operação, fale com o nosso time pelo WhatsApp (62) 99236-5959.'
 /** Plano indicado pela equipe real (ou ajuda na implantação) — parágrafo opcional. */
 const ind = (d: BillingCopyData): string[] => {
   const t = trechoIndicacao(d)
@@ -269,32 +274,45 @@ export function billingCopy(stage: string, d: BillingCopyData): BillingCopy {
         ctaLabel: 'Ver plano e faturas',
         ctaKey: 'link',
       }
-    case 'trial_d5':
+    case 'trial_d5': {
+      const prazo = prazoDoTeste(d.diasRestantes ?? 3, d.data)
       return {
-        subject: 'Seu teste do Aveto 360 termina em 2 dias',
-        heading: 'Seu teste termina em 2 dias',
+        subject: `O teste do Aveto 360 da ${empresa(d)} encerra ${prazo}`,
+        heading: `Seu teste encerra ${prazo}`,
         paragraphs: [
-          `Olá, ${nome(d)}! O teste gratuito da ${empresa(d)} no Aveto 360 termina em 2 dias.`,
+          `Olá, ${nome(d)}! O teste gratuito da ${empresa(d)} no Aveto 360 encerra ${prazo}.`,
           ...ind(d),
-          'Escolha um plano para manter o acesso sem interrupção.',
+          d.indicacao === 'plano'
+            ? 'Você pode ativar o plano indicado direto por Pix ou cartão, pelo botão abaixo.'
+            : 'Você pode escolher seu plano e ativar direto por Pix ou cartão, pelo botão abaixo.',
+          APOIO_EMAIL,
         ],
-        ctaLabel: 'Ver planos',
+        ctaLabel: d.indicacao === 'plano' ? 'Ver plano indicado' : 'Ver planos',
         ctaKey: 'linkPlanos',
         destaque: 'atencao',
       }
-    case 'trial_d7':
+    }
+    case 'trial_d7': {
+      const prazo = prazoDoTeste(d.diasRestantes ?? 0, d.data)
+      const hoje = prazo === 'hoje'
       return {
-        subject: 'Seu teste do Aveto 360 terminou',
-        heading: 'Seu teste terminou',
+        subject: hoje ? 'Hoje é o último dia do seu teste do Aveto 360' : `Seu teste do Aveto 360 encerra ${prazo}`,
+        heading: hoje ? 'Último dia do seu teste' : `Seu teste encerra ${prazo}`,
         paragraphs: [
-          `${nome(d)}, o período de teste da ${empresa(d)} terminou hoje.`,
+          hoje
+            ? `Olá, ${nome(d)}! Hoje é o último dia do teste gratuito da ${empresa(d)} no Aveto 360 (até 23h59).`
+            : `Olá, ${nome(d)}! O teste gratuito da ${empresa(d)} no Aveto 360 encerra ${prazo}.`,
           ...ind(d),
-          'Para voltar a usar o sistema, escolha um plano pelo botão abaixo. Seus dados continuam guardados.',
+          d.indicacao === 'plano' && d.plano
+            ? `Para manter o acesso da sua equipe sem interrupção, ative o plano ${d.plano} por Pix ou cartão, pelo botão abaixo.`
+            : 'Para manter o acesso sem interrupção, escolha seu plano e ative por Pix ou cartão, pelo botão abaixo.',
+          APOIO_EMAIL,
         ],
-        ctaLabel: 'Escolher um plano',
+        ctaLabel: 'Ativar meu plano',
         ctaKey: 'linkPlanos',
         destaque: 'urgente',
       }
+    }
     case 'trial_pos_1':
       return {
         subject: `Os dados da ${d.empresa ?? 'sua empresa'} continuam salvos no Aveto 360`,

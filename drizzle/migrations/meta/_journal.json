@@ -1730,6 +1730,13 @@
       "when": 1794939326829,
       "tag": "0246_regua_cobranca_whatsapp_pos_teste",
       "breakpoints": true
+    },
+    {
+      "idx": 247,
+      "version": "7",
+      "when": 1795006130640,
+      "tag": "0247_reta_final_teste_d3_d0",
+      "breakpoints": true
     }
   ]
 }

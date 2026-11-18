@@ -3,6 +3,7 @@
 // com tom cordial e sem exposição (art. 42 do CDC).
 import { normalizeBRPhone } from "./zapi.ts";
 import { trechoIndicacao, type DadosIndicacao } from "./billing-plano-indicado.ts";
+import { prazoDoTeste } from "./billing-prazo-teste.ts";
 
 export type WaDados = DadosIndicacao & {
   nome?: string | null;
@@ -17,6 +18,8 @@ export type WaDados = DadosIndicacao & {
   linkExportacao?: string;
   linkPlanos?: string;
   modulo?: string;
+  /** Dias que faltam para o fim do teste (avisos da reta final). */
+  diasRestantes?: number;
 };
 
 /** Pós-teste: 3 tentativas, em dias corridos após o fim do teste. */
@@ -94,7 +97,35 @@ const ind = (d: WaDados) => {
   return t ? `\n\n${t}` : "";
 };
 const escolha = (d: WaDados, padrao: string) => (d.indicacao === "plano" ? "ative o plano indicado" : padrao);
-const rodape = `\n\nDúvidas? Fale com nosso atendimento: ${ATENDIMENTO}`;
+/** As respostas neste WhatsApp são atendidas pela equipe Aveto. */
+export const RESPONDER = "é só responder esta mensagem";
+const rodape = `\n\nDúvidas? É só responder esta mensagem.`;
+const APOIO = `Se quiser tirar dúvidas ou precisar do apoio da nossa equipe para seguir com a implantação na sua operação, ${RESPONDER}.`;
+
+/** Reta final, 3 dias antes: equipe real + plano indicado + link direto + resposta aqui. */
+function avisoRetaFinal(d: WaDados, planos: string): string {
+  const abertura = `${ola(d)} O teste gratuito da *${emp(d)}* no AVETO 360 encerra ${prazoDoTeste(d.diasRestantes ?? 3, d.data)}.${ind(d)}`;
+  if (d.indicacao === "sob_consulta") return `${abertura}${planos ? `\n\nSe preferir, veja os planos:${planos}` : ""}`;
+  const ativar = d.indicacao === "plano"
+    ? "Você pode ativar o plano indicado direto por Pix ou cartão:"
+    : "Você pode escolher seu plano e ativar direto por Pix ou cartão:";
+  return `${abertura}\n\n${ativar}${planos}${d.indicacao === "sem_equipe" ? "" : `\n\n${APOIO}`}`;
+}
+
+/** Último dia (ou véspera, quando o fim cai no fim de semana): link direto para manter o acesso. */
+function ultimoDiaTeste(d: WaDados, planos: string): string {
+  const prazo = prazoDoTeste(d.diasRestantes ?? 0, d.data);
+  const abertura = prazo === "hoje"
+    ? `${ola(d)} Hoje é o último dia do teste gratuito da *${emp(d)}* no AVETO 360 (até 23h59).`
+    : `${ola(d)} O teste gratuito da *${emp(d)}* no AVETO 360 encerra ${prazo}.`;
+  if (d.indicacao === "sob_consulta") {
+    return `${abertura}\n\nPara a estrutura da sua empresa, preparamos uma proposta sob medida: ${RESPONDER}.${planos ? `\n\nSe preferir, veja os planos:${planos}` : ""}`;
+  }
+  const ativar = d.indicacao === "plano" && d.plano
+    ? `Para manter o acesso da sua equipe sem interrupção, ative o plano *${d.plano}*${d.detalhePlano ? ` (${d.detalhePlano})` : ""} por Pix ou cartão:`
+    : "Para manter o acesso sem interrupção, escolha seu plano e ative por Pix ou cartão:";
+  return `${abertura}\n\n${ativar}${planos}\n\nPrecisa de apoio com a implantação na sua operação? ${RESPONDER[0].toUpperCase()}${RESPONDER.slice(1)}.`;
+}
 
 /** Texto do WhatsApp por estágio. `null` = estágio sem versão para WhatsApp. */
 export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
@@ -104,9 +135,9 @@ export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
   switch (stage) {
     // ---------- teste grátis ----------
     case "trial_d5":
-      return `${ola(d)} O teste grátis da *${emp(d)}* no AVETO 360 termina em 2 dias${d.data ? ` (${d.data})` : ""}.${ind(d)}\n\nPara continuar sem interrupção, ${escolha(d, "escolha seu plano")}:${planos}${rodape}`;
+      return avisoRetaFinal(d, planos);
     case "trial_d7":
-      return `${ola(d)} Hoje é o último dia do teste grátis da *${emp(d)}* no AVETO 360.${ind(d)}\n\nPara manter a operação organizada, ${escolha(d, "escolha seu plano")}:${planos}${rodape}`;
+      return ultimoDiaTeste(d, planos);
     case "trial_pos_1":
       return `${ola(d)} Tudo bem? O teste gratuito da *${emp(d)}* no AVETO 360 foi encerrado, mas todos os seus dados${d.indicacao === "sem_equipe" ? "" : ", colaboradores"} e cadastros continuam *100% salvos e seguros*.${ind(d)}\n\nPara não perder o ritmo da operação, você ativa ${d.indicacao === "plano" ? "o plano indicado" : "seu plano"} em 1 minuto, por Pix ou cartão:${planos}${rodape}`;
     case "trial_pos_4":
