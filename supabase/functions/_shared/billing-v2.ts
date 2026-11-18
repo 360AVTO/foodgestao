@@ -4,6 +4,7 @@
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { asaasFetch, parseAsaasEnv, requireAsaasId, type AsaasEnv } from "./asaas.ts";
 import { hojeBrasilia, janelaDesconto } from "./billing-desconto-negociado.ts";
+import { enderecoDaConta } from "./billing-endereco.ts";
 
 export type Ciclo = "mensal" | "anual";
 export type Forma = "pix" | "boleto" | "cartao";
@@ -65,9 +66,11 @@ export async function garantirCliente(admin: SupabaseClient, conta: Conta, email
       throw new BillingError(409, "Este CPF/CNPJ já é pagador de outra conta de cobrança. Nenhuma cobrança foi criada. Fale com o suporte.");
     }
   }
+  // Endereço do cadastro da empresa: exigido pelo Asaas para emitir a NFS-e.
+  const endereco = await enderecoDaConta(admin, conta.id, doc);
   const c = await asaasFetch("/customers", {
     method: "POST",
-    body: JSON.stringify({ name: conta.nome, cpfCnpj: doc, email: conta.email_cobranca ?? email, externalReference: conta.id, notificationDisabled: true }),
+    body: JSON.stringify({ name: conta.nome, cpfCnpj: doc, email: conta.email_cobranca ?? email, externalReference: conta.id, notificationDisabled: true, ...(endereco ?? {}) }),
   }, conta.asaas_env);
   const id = requireAsaasId(c, "o cliente");
   await assertClienteExclusivo(admin, conta, id);

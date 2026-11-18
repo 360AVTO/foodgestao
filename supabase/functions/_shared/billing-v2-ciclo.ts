@@ -5,6 +5,7 @@ import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { asaasFetch, parseAsaasEnv } from "./asaas.ts";
 import { ASAAS_MINIMO_CENTS, atualizarValorAsaas, cortesiaIntegral, type Criados } from "./billing-v2.ts";
 import { precoExcedenteColaborador } from "./billing-excedente-preco.ts";
+import { sincronizarEnderecoCliente } from "./billing-endereco.ts";
 import { comDesconto, hojeBrasilia, mensalidadeDeveVoltar, percentualExcedente, type DescontoNegociado } from "./billing-desconto-negociado.ts";
 
 /** Desconto negociado amarrado à assinatura (o mais recente). */
@@ -165,10 +166,14 @@ async function nfseLigada(admin: SupabaseClient, contaId: string | null): Promis
 async function nfseConfig(admin: SupabaseClient) {
   const { data } = await admin.from("system_parameters").select("value").eq("key", "nfse_config").maybeSingle();
   const v = ((data as any)?.value ?? {}) as Record<string, any>;
+  const descricao = String(v.descricao ?? "").trim() || "Licença de uso do software Aveto 360 (SaaS)";
+  // Portal Nacional: só municipalServiceCode (Código de Tributação Nacional); nunca os dois.
+  const codigo = String(v.codigo_servico ?? "").trim() || undefined;
+  const servicoId = codigo ? undefined : (String(v.servico_id ?? "").trim() || undefined);
   return {
-    serviceDescription: v.descricao ?? "Licença de uso do software Aveto 360 (SaaS)",
-    municipalServiceCode: v.codigo_servico ?? undefined, municipalServiceId: v.servico_id ?? undefined,
-    municipalServiceName: v.nome_servico ?? undefined,
+    serviceDescription: descricao,
+    municipalServiceCode: codigo, municipalServiceId: servicoId,
+    municipalServiceName: String(v.nome_servico ?? "").trim() || descricao,
     taxes: { retainIss: false, iss: Number(v.iss ?? 0), cofins: 0, csll: 0, inss: 0, ir: 0, pis: 0 },
   };
 }
@@ -183,15 +188,19 @@ export async function configurarNfseAssinatura(admin: SupabaseClient, sub: any) 
   return true;
 }
 
-/** Pagamento confirmado → solicita NFS-e (idempotente por fatura). Nunca para total zero. */
-export async function solicitarNfse(admin: SupabaseClient, invoice: any, env: "production" | "sandbox") {
+/**
+ * Pagamento confirmado → solicita NFS-e (idempotente por fatura). Nunca para total zero.
+ * `reprocessar` (só super admin) reenvia apenas solicitações recusadas, sem nova cobrança,
+ * conferindo antes se o Asaas já tem nota para o pagamento.
+ */
+export async function solicitarNfse(admin: SupabaseClient, invoice: any, env: "production" | "sandbox", opts: { reprocessar?: boolean } = {}) {
   if (invoice.asaas_env !== env) return { status: "ignorada_ambiente" };
   const valor = Number(invoice.amount_cents ?? 0);
   const { data: sub } = invoice.subscription_id
     ? await admin.from("subscriptions").select("id,billing_account_id,external_subscription_id,asaas_env").eq("id", invoice.subscription_id).maybeSingle()
     : { data: null };
   const contaId = invoice.billing_account_id ?? (sub as any)?.billing_account_id ?? null;
-  const { data: conta } = contaId ? await admin.from("billing_accounts").select("documento_pagador,is_test,asaas_env").eq("id", contaId).maybeSingle() : { data: null };
+  const { data: conta } = contaId ? await admin.from("billing_accounts").select("documento_pagador,is_test,asaas_env,asaas_customer_id").eq("id", contaId).maybeSingle() : { data: null };
   // sandbox só emite (no Sandbox) para contas de teste; nunca cruza ambientes
   if (env === "sandbox" && !(conta as any)?.is_test) return { status: "ignorada_sandbox" };
   if ((conta as any)?.asaas_env && (conta as any).asaas_env !== env) return { status: "ignorada_ambiente" };
@@ -201,9 +210,10 @@ export async function solicitarNfse(admin: SupabaseClient, invoice: any, env: "p
     await admin.from("billing_v2_nfse_solicitacoes").upsert({ ...base, status: "nao_emitida_valor_zero" }, { onConflict: "invoice_id", ignoreDuplicates: true });
     return { status: "nao_emitida_valor_zero" };
   }
-  const { data: ja } = await admin.from("billing_v2_nfse_solicitacoes").select("status").eq("invoice_id", invoice.id).maybeSingle();
-  if (ja) return { status: ja.status, repetida: true };
-  if ((sub as any)?.external_subscription_id && invoice.external_invoice_id) {
+  const { data: ja } = await admin.from("billing_v2_nfse_solicitacoes").select("id,status").eq("invoice_id", invoice.id).maybeSingle();
+  const reenvio = !!ja && opts.reprocessar === true && ja.status === "recusada_asaas";
+  if (ja && !reenvio) return { status: ja.status, repetida: true };
+  if (!reenvio && (sub as any)?.external_subscription_id && invoice.external_invoice_id) {
     const { count } = await admin.from("subscription_events").select("id", { count: "exact", head: true })
       .eq("subscription_id", (sub as any).id).eq("tipo_evento", "nfse_automatica_configurada");
     if ((count ?? 0) > 0) {
@@ -214,14 +224,40 @@ export async function solicitarNfse(admin: SupabaseClient, invoice: any, env: "p
   const cfg = await nfseConfig(admin);
   let status = "solicitada", resposta: any = null, nfId: string | null = null;
   try {
-    resposta = await asaasFetch("/invoices", { method: "POST", body: JSON.stringify({
-      payment: invoice.external_invoice_id, ...cfg, observations: `Fatura Aveto 360 ${invoice.id.slice(0, 8)}`,
-      value: reais(valor), deductions: 0, effectiveDate: hoje(0) }) }, env);
-    nfId = resposta?.id ?? null;
+    if (!cfg.municipalServiceCode && !cfg.municipalServiceId) {
+      throw new Error("Configuração fiscal sem código do serviço. Informe o código em Super Admin > Assinaturas > Nota Fiscal.");
+    }
+    // Reenvio: se o Asaas já tem nota ativa para este pagamento, só registra (nunca duplica).
+    const existente = reenvio && invoice.external_invoice_id
+      ? ((await asaasFetch(`/invoices?payment=${invoice.external_invoice_id}`, {}, env))?.data ?? [])
+        .find((n: any) => !["CANCELED", "CANCELLED", "ERROR", "CANCELLATION_DENIED"].includes(String(n?.status ?? "").toUpperCase()))
+      : null;
+    if (existente) {
+      resposta = existente; nfId = existente.id ?? null;
+    } else {
+      // Endereço do pagador vem do cadastro da empresa e é atualizado no cliente do Asaas antes da nota.
+      const clienteId = (conta as any)?.asaas_customer_id as string | undefined;
+      if (contaId && clienteId) {
+        const ok = await sincronizarEnderecoCliente(admin, contaId, clienteId, (conta as any)?.documento_pagador, env);
+        if (!ok) throw new Error("Endereço da empresa pagadora incompleto (CEP, logradouro e bairro). Complete em Empresas > Editar Empresa.");
+      }
+      resposta = await asaasFetch("/invoices", { method: "POST", body: JSON.stringify({
+        payment: invoice.external_invoice_id, ...cfg, observations: `Fatura Aveto 360 ${invoice.id.slice(0, 8)}`,
+        value: reais(valor), deductions: 0, effectiveDate: hoje(0) }) }, env);
+      nfId = resposta?.id ?? null;
+    }
   } catch (e) {
     status = "recusada_asaas"; resposta = { erro: String((e as Error).message ?? e) };
   }
-  await admin.from("billing_v2_nfse_solicitacoes").insert({ ...base, status, asaas_invoice_id: nfId, resposta });
+  if (reenvio) {
+    const anterior = (await admin.from("billing_v2_nfse_solicitacoes").select("resposta").eq("id", ja!.id).single()).data as any;
+    const prev = anterior?.resposta ?? {};
+    const historico = [...(Array.isArray(prev.tentativas_anteriores) ? prev.tentativas_anteriores : []),
+      { reenviada_em: new Date().toISOString(), status: ja!.status, erro: prev.erro ?? null }];
+    await admin.from("billing_v2_nfse_solicitacoes").update({ status, asaas_invoice_id: nfId, resposta: { ...(resposta ?? {}), tentativas_anteriores: historico } }).eq("id", ja!.id);
+  } else {
+    await admin.from("billing_v2_nfse_solicitacoes").insert({ ...base, status, asaas_invoice_id: nfId, resposta });
+  }
   return { status, asaas_invoice_id: nfId, resposta };
 }
 
