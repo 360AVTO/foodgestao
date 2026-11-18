@@ -127,7 +127,7 @@ Deno.serve(async (req) => {
     return nome;
   }
 
-  /** Dono + membros com conta.assinatura (>= consulta) + e-mail financeiro da empresa. */
+  /** Dono + membros com conta.assinatura (>= consulta) + e-mail da empresa + e-mail do responsável financeiro. */
   async function destinatarios(row: ScanRow): Promise<{ email: string; nome: string | null }[]> {
     const saida = new Map<string, string | null>();
 
@@ -148,9 +148,18 @@ Deno.serve(async (req) => {
       if (mail && !saida.has(mail)) saida.set(mail, await nomeDe(String(m.user_id)));
     }
 
-    const financeiro = row.company_email?.toLowerCase().trim();
-    if (financeiro && financeiro.includes("@") && !saida.has(financeiro)) {
-      saida.set(financeiro, null);
+    const emailEmpresa = row.company_email?.toLowerCase().trim();
+    if (emailEmpresa && emailEmpresa.includes("@") && !saida.has(emailEmpresa)) {
+      saida.set(emailEmpresa, null);
+    }
+
+    // Responsável financeiro informado no cadastro da empresa
+    const { data: emp } = await admin.from("companies").select("financeiro_email, financeiro_nome")
+      .eq("id", row.company_id).maybeSingle();
+    const finEmail = String(emp?.financeiro_email ?? "").toLowerCase().trim();
+    if (finEmail.includes("@")) {
+      const finNome = String(emp?.financeiro_nome ?? "").trim().split(/\s+/)[0] || null;
+      if (!saida.has(finEmail) || saida.get(finEmail) === null) saida.set(finEmail, finNome);
     }
 
     return [...saida.entries()].map(([email, nome]) => ({ email, nome }));

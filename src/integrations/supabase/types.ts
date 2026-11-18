@@ -2853,6 +2853,8 @@ export type Database = {
           complemento: string | null
           created_at: string
           email: string | null
+          financeiro_email: string | null
+          financeiro_nome: string | null
           id: string
           is_active: boolean
           logradouro: string | null
@@ -2860,6 +2862,9 @@ export type Database = {
           numero: string | null
           phone: string | null
           profile_type: string
+          proprietario_nome: string | null
+          proprietario_recebe_cobranca: boolean
+          proprietario_whatsapp: string | null
           segmento_id: string | null
           status_tenant: string
           timezone: string | null
@@ -2880,6 +2885,8 @@ export type Database = {
           complemento?: string | null
           created_at?: string
           email?: string | null
+          financeiro_email?: string | null
+          financeiro_nome?: string | null
           id?: string
           is_active?: boolean
           logradouro?: string | null
@@ -2887,6 +2894,9 @@ export type Database = {
           numero?: string | null
           phone?: string | null
           profile_type?: string
+          proprietario_nome?: string | null
+          proprietario_recebe_cobranca?: boolean
+          proprietario_whatsapp?: string | null
           segmento_id?: string | null
           status_tenant?: string
           timezone?: string | null
@@ -2907,6 +2917,8 @@ export type Database = {
           complemento?: string | null
           created_at?: string
           email?: string | null
+          financeiro_email?: string | null
+          financeiro_nome?: string | null
           id?: string
           is_active?: boolean
           logradouro?: string | null
@@ -2914,6 +2926,9 @@ export type Database = {
           numero?: string | null
           phone?: string | null
           profile_type?: string
+          proprietario_nome?: string | null
+          proprietario_recebe_cobranca?: boolean
+          proprietario_whatsapp?: string | null
           segmento_id?: string | null
           status_tenant?: string
           timezone?: string | null

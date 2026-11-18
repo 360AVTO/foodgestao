@@ -81,3 +81,24 @@ Deno.test("destinatários: administrador com o mesmo número do financeiro receb
   const r = destinosWhatsapp({ telefone: null }, { telefone: "61981358143" }, [{ telefone: "(61) 98135-8143", nome: "Samanta" }]);
   assertEquals(r.map((x) => [x.nome, x.papel]), [["Samanta", "admin"]]);
 });
+
+Deno.test("proprietário só recebe com a opção ligada no cadastro da empresa", () => {
+  const prop = { telefone: "(64) 98136-7653", nome: "Rafael" };
+  const desligado = destinosWhatsapp({ telefone: "64992168514", nome: "Maria" }, { telefone: null }, [], { ...prop, recebe: false });
+  assertEquals(desligado.map((x) => x.papel), ["dono"]);
+  const semOpcao = destinosWhatsapp({ telefone: "64992168514" }, { telefone: null }, [], prop);
+  assertEquals(semOpcao.map((x) => x.papel), ["dono"]);
+  const ligado = destinosWhatsapp({ telefone: "64992168514", nome: "Maria" }, { telefone: null }, [], { ...prop, recebe: true });
+  assertEquals(ligado.map((x) => [x.phone, x.nome, x.papel]), [
+    ["5564992168514", "Maria", "dono"],
+    ["5564981367653", "Rafael", "proprietario"],
+  ]);
+});
+
+Deno.test("financeiro recebe com o próprio nome e proprietário com o mesmo número não duplica", () => {
+  const r = destinosWhatsapp({ telefone: null }, { telefone: "64992168514", nome: "Maria" }, [],
+    { telefone: "+55 64 99216-8514", nome: "Rafael", recebe: true });
+  assertEquals(r.map((x) => [x.nome, x.papel]), [["Rafael", "proprietario"]]);
+  const so = destinosWhatsapp({ telefone: null }, { telefone: "64992168514", nome: "Maria" });
+  assertEquals(so.map((x) => [x.nome, x.papel]), [["Maria", "financeiro"]]);
+});

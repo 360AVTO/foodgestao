@@ -26,3 +26,6 @@ Arquitetura: `pluggy-connect-token` → Pluggy Connect Widget (v2.11.0 fixada) �
 14. Lógica pura: mudanças em regras puras ficam em `_shared/*.ts` com teste unitário.
 
 Checklist antes de alterar qualquer coisa Pluggy: a mudança respeita as regras 1–14? Há teste cobrindo a regra alterada? Cron, webhook ou worker mudaram? Conferir frequência e uso de claim atômico.
+
+## Cobrança
+- Billing contacts: business owner (`companies.proprietario_*`) gets billing WhatsApp only when `proprietario_recebe_cobranca`; financial WhatsApp stays in `billing_accounts.whatsapp_cobranca`, recipient order/dedup only in `_shared/billing-whatsapp.ts` — one source for all billing senders.

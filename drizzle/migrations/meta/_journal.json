@@ -1751,6 +1751,13 @@
       "when": 1795009466043,
       "tag": "0249_reta_final_pausa_gestores",
       "breakpoints": true
+    },
+    {
+      "idx": 250,
+      "version": "7",
+      "when": 1795013407030,
+      "tag": "0250_empresa_proprietario_financeiro",
+      "breakpoints": true
     }
   ]
 }

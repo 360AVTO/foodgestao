@@ -12,6 +12,8 @@ import { AlertCircle, Building2, Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { EmpresaFormData } from "@/pages/Onboarding";
 import type { CnpjLookupResult } from "@/hooks/useCnpjLookup";
+import { ContatosEmpresaCampos } from "@/components/companies/ContatosEmpresaCampos";
+import { CONTATOS_VAZIOS } from "@/lib/empresa/contatosEmpresa";
 
 interface Props {
   data: EmpresaFormData;
@@ -271,6 +273,20 @@ export function StepEmpresa({ data, update, errors, setCnpjPending, cnpjInactive
           />
         </Field>
       </fieldset>
+
+      {/* Proprietário (opcional) */}
+      <ContatosEmpresaCampos
+        idPrefix="onb"
+        comFinanceiro={false}
+        valor={{
+          ...CONTATOS_VAZIOS,
+          proprietarioNome: data.proprietarioNome ?? "",
+          proprietarioWhatsapp: data.proprietarioWhatsapp ?? "",
+          proprietarioRecebe: data.proprietarioRecebe === true,
+        }}
+        onChange={(patch) => update(patch as Partial<EmpresaFormData>)}
+        erros={{ proprietarioNome: errors.proprietarioNome, proprietarioWhatsapp: errors.proprietarioWhatsapp }}
+      />
 
       {/* LGPD */}
       <div className="flex items-start gap-3 rounded-lg border bg-muted/40 p-3">

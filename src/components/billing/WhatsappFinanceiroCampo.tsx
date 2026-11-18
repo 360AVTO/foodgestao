@@ -69,7 +69,7 @@ export function WhatsappFinanceiroCampo({ companyId }: { companyId: string }) {
         )}
       </div>
       <p className="text-xs text-muted-foreground">
-        Recebe pelo WhatsApp da Aveto 360 os lembretes de fatura e do plano, junto com o dono da empresa.
+        Recebe pelo WhatsApp da Aveto 360 os lembretes de fatura e do plano, junto com os gestores da empresa.
       </p>
 
       <Dialog open={aberto} onOpenChange={(o) => !o && setAberto(false)}>

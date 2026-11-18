@@ -30,7 +30,8 @@ beforeAll(() => {
 const VAZIO: EmpresaFormData = {
   nomeCompleto: "", cnpj: "", razaoSocial: "", nomeFantasia: "", segmentoId: "",
   cep: "", logradouro: "", numero: "", complemento: "", bairro: "", cidade: "", uf: "",
-  telefoneEmpresa: "", whatsappEmpresa: "", emailEmpresa: "", aceitouLgpd: false,
+  telefoneEmpresa: "", whatsappEmpresa: "", emailEmpresa: "",
+  proprietarioNome: "", proprietarioWhatsapp: "", proprietarioRecebe: false, aceitouLgpd: false,
 };
 
 function renderStep(errors: Partial<Record<keyof EmpresaFormData, string>> = {}) {
@@ -52,13 +53,13 @@ function renderStep(errors: Partial<Record<keyof EmpresaFormData, string>> = {})
 const ROTULOS = [
   "Nome Completo", "CNPJ", "Razão Social", "Nome Fantasia", "Segmento",
   "CEP", "Rua / Avenida", "Número", "Complemento", "Bairro", "Cidade", "Estado \\(UF\\)",
-  "Telefone", "WhatsApp", "E-mail",
+  "Telefone", "WhatsApp da empresa", "E-mail",
 ];
 
 const OBRIGATORIOS = [
   "Nome Completo", "CNPJ", "Razão Social", "Segmento",
   "CEP", "Rua / Avenida", "Número", "Bairro", "Cidade", "Estado \\(UF\\)",
-  "WhatsApp", "E-mail",
+  "WhatsApp da empresa", "E-mail",
 ];
 
 describe("Cadastro inicial — acessibilidade dos campos", () => {

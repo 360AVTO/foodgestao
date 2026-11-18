@@ -25,6 +25,7 @@ import { useCompanyContext } from "@/hooks/useCompanyContext";
 import { useOnboardingSubmit, mensagemErroOnboarding } from "@/hooks/useOnboardingSubmit";
 import { marcarOnboardingConcluido } from "@/lib/onboardingFinalize";
 import { checkOnboardingCnpj, resolveOnboardingByExistingCnpj } from "@/lib/onboardingStatus";
+import { CONTATOS_VAZIOS, validarContatosEmpresa } from "@/lib/empresa/contatosEmpresa";
 
 export interface EmpresaFormData {
   nomeCompleto: string;
@@ -42,6 +43,10 @@ export interface EmpresaFormData {
   telefoneEmpresa: string;
   whatsappEmpresa: string;
   emailEmpresa: string;
+  /** Dono do negócio (opcional); só recebe cobranças com a opção marcada. */
+  proprietarioNome: string;
+  proprietarioWhatsapp: string;
+  proprietarioRecebe: boolean;
   aceitouLgpd: boolean;
 }
 
@@ -61,8 +66,20 @@ const EMPTY_EMPRESA: EmpresaFormData = {
   telefoneEmpresa: "",
   whatsappEmpresa: "",
   emailEmpresa: "",
+  proprietarioNome: "",
+  proprietarioWhatsapp: "",
+  proprietarioRecebe: false,
   aceitouLgpd: false,
 };
+
+function contatosDoOnboarding(d: EmpresaFormData) {
+  return validarContatosEmpresa({
+    ...CONTATOS_VAZIOS,
+    proprietarioNome: d.proprietarioNome ?? "",
+    proprietarioWhatsapp: d.proprietarioWhatsapp ?? "",
+    proprietarioRecebe: d.proprietarioRecebe === true,
+  });
+}
 
 function validateEmpresa(d: EmpresaFormData): Partial<Record<keyof EmpresaFormData, string>> {
   const e: Partial<Record<keyof EmpresaFormData, string>> = {};
@@ -82,6 +99,11 @@ function validateEmpresa(d: EmpresaFormData): Partial<Record<keyof EmpresaFormDa
   if (d.telefoneEmpresa && !isValidPhone(d.telefoneEmpresa)) e.telefoneEmpresa = "Telefone inválido.";
   if (!d.emailEmpresa.trim()) e.emailEmpresa = "Informe o e-mail.";
   else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d.emailEmpresa)) e.emailEmpresa = "E-mail inválido.";
+  const cont = contatosDoOnboarding(d);
+  if (cont.ok === false) {
+    if (cont.erros.proprietarioNome) e.proprietarioNome = cont.erros.proprietarioNome;
+    if (cont.erros.proprietarioWhatsapp) e.proprietarioWhatsapp = cont.erros.proprietarioWhatsapp;
+  }
   if (!d.aceitouLgpd) e.aceitouLgpd = "Você precisa aceitar os Termos e a Política de Privacidade.";
   return e;
 }
@@ -233,6 +255,17 @@ export default function Onboarding() {
         modulosSlugs: modulos,
         criarUnidade: criarUnidade && modulos.includes("dp"),
       });
+
+      // Proprietário do negócio (opcional): gravado na empresa recém-criada, sem travar o cadastro.
+      const cont = contatosDoOnboarding(empresa);
+      if (cont.ok && res?.company_id && (cont.valor.proprietario_nome || cont.valor.proprietario_whatsapp)) {
+        const { error: eProp } = await supabase.from("companies").update({
+          proprietario_nome: cont.valor.proprietario_nome,
+          proprietario_whatsapp: cont.valor.proprietario_whatsapp,
+          proprietario_recebe_cobranca: cont.valor.proprietario_recebe_cobranca,
+        }).eq("id", res.company_id);
+        if (eProp) toast.warning("Empresa criada. Confira os dados do proprietário em Empresas.");
+      }
 
       // Marca onboarding concluído no profile
       if (user) {

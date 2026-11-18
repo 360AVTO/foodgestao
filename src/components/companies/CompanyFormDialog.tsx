@@ -13,6 +13,13 @@ import { maskCep } from "@/lib/endereco";
 import { parseEnderecoTexto } from "@/lib/dp/ficha-registro/endereco-parse";
 import type { CnpjLookupResult } from "@/hooks/useCnpjLookup";
 import { isValidCnpj } from "@/lib/cnpj";
+import { ContatosEmpresaCampos } from "@/components/companies/ContatosEmpresaCampos";
+import {
+  CONTATOS_VAZIOS, contatosDoCadastro, validarContatosEmpresa,
+  type CampoContato, type ContatosEmpresaForm,
+} from "@/lib/empresa/contatosEmpresa";
+import { formatarWhatsapp, validarWhatsappCobranca } from "@/lib/billing/whatsappCobranca";
+import { maskPhone } from "@/lib/phone";
 import type { Database } from "@/integrations/supabase/types";
 
 type Company = Database["public"]["Tables"]["companies"]["Row"];
@@ -35,6 +42,30 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
   const [phone, setPhone] = useState("");
   const [whatsapp, setWhatsapp] = useState("");
   const [endereco, setEndereco] = useState<EnderecoValor>({});
+  const [contatos, setContatos] = useState<ContatosEmpresaForm>(CONTATOS_VAZIOS);
+  const [errosContato, setErrosContato] = useState<Partial<Record<CampoContato, string>>>({});
+  // WhatsApp do financeiro fica na conta de cobrança (mesmo campo de Minha Assinatura).
+  const [finWa, setFinWa] = useState("");
+  const [finWaOriginal, setFinWaOriginal] = useState<string | null>(null);
+  const [finWaPode, setFinWaPode] = useState(false);
+  const [finWaCarregado, setFinWaCarregado] = useState(false);
+  const [finWaErro, setFinWaErro] = useState<string | null>(null);
+
+  useEffect(() => {
+    let ativo = true;
+    setFinWa(""); setFinWaOriginal(null); setFinWaPode(false); setFinWaCarregado(false); setFinWaErro(null);
+    if (!open || !company) return;
+    supabase.rpc("billing_v2_whatsapp_cobranca_obter", { _company_id: company.id }).then(({ data, error }) => {
+      if (!ativo || error) return;
+      const info = data as unknown as { tem_conta: boolean; whatsapp: string | null; pode_alterar: boolean } | null;
+      if (!info?.tem_conta) return;
+      setFinWaOriginal(info.whatsapp);
+      setFinWa(info.whatsapp ? formatarWhatsapp(info.whatsapp) : "");
+      setFinWaPode(info.pode_alterar === true);
+      setFinWaCarregado(true);
+    });
+    return () => { ativo = false; };
+  }, [company, open]);
 
   useEffect(() => {
     if (company) {
@@ -44,6 +75,8 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
       setEmail(company.email ?? "");
       setPhone(company.phone ?? "");
       setWhatsapp((company as any).whatsapp ?? "");
+      setContatos(contatosDoCadastro(company));
+      setErrosContato({});
       const c = company as any;
       const temPartes = [c.cep, c.logradouro, c.numero, c.bairro, c.cidade, c.uf].some(Boolean);
       if (temPartes) {
@@ -77,6 +110,8 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
       setPhone("");
       setWhatsapp("");
       setEndereco({});
+      setContatos(CONTATOS_VAZIOS);
+      setErrosContato({});
     }
   }, [company, open]);
 
@@ -119,6 +154,21 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
     }, toast.error);
     if (!validated) return;
 
+    const cont = validarContatosEmpresa(contatos);
+    if (cont.ok === false) {
+      setErrosContato(cont.erros);
+      toast.error("Confira os contatos do proprietário e do financeiro.");
+      return;
+    }
+    setErrosContato({});
+    let finWaNovo: string | null = finWaOriginal;
+    if (finWaCarregado && finWaPode) {
+      const r = validarWhatsappCobranca(finWa);
+      if (r.ok === false) { setFinWaErro(r.erro); toast.error(r.erro); return; }
+      finWaNovo = r.valor;
+    }
+    setFinWaErro(null);
+
     setSaving(true);
 
     const limpar = (v?: string | null) => {
@@ -136,6 +186,7 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
       bairro: limpar(endereco.bairro),
       cidade: limpar(endereco.cidade),
       uf: limpar(endereco.uf),
+      ...cont.valor,
     };
 
     let error;
@@ -144,6 +195,13 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
       ({ error } = await supabase.from("companies").update(updatePayload).eq("id", company.id));
     } else {
       ({ error } = await supabase.from("companies").insert(payload as any));
+    }
+
+    if (!error && company && finWaCarregado && finWaPode && finWaNovo !== finWaOriginal) {
+      const { error: eWa } = await supabase.rpc("billing_v2_whatsapp_cobranca_definir", {
+        _company_id: company.id, _whatsapp: finWaNovo ?? "",
+      });
+      if (eWa) toast.error("Empresa salva, mas o WhatsApp do financeiro não foi atualizado.", { description: eWa.message });
     }
 
     if (error) {
@@ -164,7 +222,7 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>{company ? "Editar Empresa" : "Nova Empresa"}</DialogTitle>
           <DialogDescription>
@@ -206,17 +264,17 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="company-phone">Telefone</Label>
+                  <Label htmlFor="company-phone">Telefone da empresa</Label>
                   <Input id="company-phone" value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="(00) 00000-0000" maxLength={20} />
                 </div>
               </div>
               <div className="grid gap-4 sm:grid-cols-2">
                 <div className="space-y-2">
-                  <Label htmlFor="company-whatsapp">WhatsApp Cadastrado</Label>
+                  <Label htmlFor="company-whatsapp">WhatsApp da empresa</Label>
                   <Input id="company-whatsapp" value={whatsapp} onChange={(e) => setWhatsapp(e.target.value)} placeholder="(00) 00000-0000" maxLength={20} />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="company-email">E-mail</Label>
+                  <Label htmlFor="company-email">E-mail da empresa</Label>
                   <Input id="company-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="empresa@exemplo.com" maxLength={100} />
                 </div>
               </div>
@@ -228,6 +286,36 @@ export function CompanyFormDialog({ open, onOpenChange, onSaved, company }: Comp
                   onChange={(patch) => setEndereco((e) => ({ ...e, ...patch }))}
                 />
               </div>
+              <ContatosEmpresaCampos
+                idPrefix="company"
+                valor={contatos}
+                onChange={(patch) => {
+                  setContatos((c) => ({ ...c, ...patch }));
+                  setErrosContato((e) => {
+                    const n = { ...e };
+                    for (const k of Object.keys(patch) as CampoContato[]) delete n[k];
+                    return n;
+                  });
+                }}
+                erros={errosContato}
+                whatsappFinanceiro={finWaCarregado ? (
+                  <div className="space-y-1.5 sm:col-span-2">
+                    <Label htmlFor="company-fin-wa" className="text-xs font-medium">WhatsApp do financeiro</Label>
+                    {finWaPode ? (
+                      <>
+                        <Input id="company-fin-wa" value={finWa} maxLength={16} inputMode="tel" autoComplete="off"
+                          placeholder="(00) 90000-0000"
+                          aria-invalid={finWaErro ? true : undefined}
+                          aria-describedby={finWaErro ? "company-fin-wa-erro" : undefined}
+                          onChange={(e) => { setFinWa(maskPhone(e.target.value)); setFinWaErro(null); }} />
+                        {finWaErro && <p id="company-fin-wa-erro" role="alert" className="text-xs text-destructive">{finWaErro}</p>}
+                      </>
+                    ) : (
+                      <p id="company-fin-wa" className="text-sm">{finWaOriginal ? formatarWhatsapp(finWaOriginal) : "Não informado"}</p>
+                    )}
+                  </div>
+                ) : null}
+              />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
             <Button type="submit" disabled={saving || cnpjLookupPending || !name.trim()}>

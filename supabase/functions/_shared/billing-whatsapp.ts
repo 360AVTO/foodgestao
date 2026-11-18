@@ -72,16 +72,22 @@ export function validadeWhatsapp(stage: string, criadoEm: Date): Date {
   return new Date(fimDoDia + BRT_MS);
 }
 
-export type DestinoWa = { phone: string; nome: string | null; papel: "dono" | "admin" | "financeiro" };
+export type DestinoWa = {
+  phone: string;
+  nome: string | null;
+  papel: "dono" | "proprietario" | "admin" | "financeiro";
+};
 
 /**
- * Dono primeiro, depois os demais gestores (donos/administradores ativos da empresa),
- * e o financeiro só se for outro número. Cada número recebe uma única vez; inválidos ficam de fora.
+ * Titular do acesso primeiro; o proprietário do negócio só com a opção da empresa ligada;
+ * depois os demais gestores (donos/administradores ativos) e o responsável financeiro.
+ * Cada número recebe uma única vez; inválidos ficam de fora.
  */
 export function destinosWhatsapp(
   dono: { telefone?: string | null; nome?: string | null },
-  financeiro: { telefone?: string | null },
+  financeiro: { telefone?: string | null; nome?: string | null },
   gestores: Array<{ telefone?: string | null; nome?: string | null }> = [],
+  proprietario: { telefone?: string | null; nome?: string | null; recebe?: boolean | null } | null = null,
 ): DestinoWa[] {
   const saida: DestinoWa[] = [];
   const vistos = new Set<string>();
@@ -92,8 +98,9 @@ export function destinosWhatsapp(
     saida.push({ phone: n, nome, papel });
   };
   add(dono.telefone, dono.nome ?? null, "dono");
+  if (proprietario?.recebe === true) add(proprietario.telefone, proprietario.nome ?? null, "proprietario");
   for (const g of gestores) add(g.telefone, g.nome ?? null, "admin");
-  add(financeiro.telefone, null, "financeiro");
+  add(financeiro.telefone, financeiro.nome ?? null, "financeiro");
   return saida;
 }
 

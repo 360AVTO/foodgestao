@@ -1,5 +1,6 @@
-// Leituras de servidor da régua por WhatsApp: interruptor geral e números
-// do dono, dos administradores ativos da empresa e do financeiro da conta de cobrança.
+// Leituras de servidor da régua por WhatsApp: interruptor geral e números do titular,
+// do proprietário (só com a opção ligada no cadastro da empresa), dos administradores
+// ativos e do responsável financeiro da conta de cobrança.
 import { destinosWhatsapp, type DestinoWa } from "./billing-whatsapp.ts";
 
 // deno-lint-ignore no-explicit-any
@@ -44,6 +45,10 @@ export async function destinosWhatsappCobranca(
       });
     }
   }
+  const primeiro = (v: unknown) => String(v ?? "").trim().split(/\s+/)[0] || null;
+  const { data: emp } = await admin.from("companies")
+    .select("proprietario_nome, proprietario_whatsapp, proprietario_recebe_cobranca, financeiro_nome")
+    .eq("id", companyId).maybeSingle();
   let finTel: string | null = null;
   const { data: vinc } = await admin.from("billing_account_companies").select("billing_account_id")
     .eq("company_id", companyId).is("removed_at", null).limit(1).maybeSingle();
@@ -52,5 +57,14 @@ export async function destinosWhatsappCobranca(
       .eq("id", vinc.billing_account_id).maybeSingle();
     finTel = (conta?.whatsapp_cobranca as string | null) ?? null;
   }
-  return destinosWhatsapp({ telefone: donoTel, nome: donoNome }, { telefone: finTel }, gestores);
+  return destinosWhatsapp(
+    { telefone: donoTel, nome: donoNome },
+    { telefone: finTel, nome: primeiro(emp?.financeiro_nome) },
+    gestores,
+    {
+      telefone: (emp?.proprietario_whatsapp as string | null) ?? null,
+      nome: primeiro(emp?.proprietario_nome),
+      recebe: emp?.proprietario_recebe_cobranca === true,
+    },
+  );
 }
