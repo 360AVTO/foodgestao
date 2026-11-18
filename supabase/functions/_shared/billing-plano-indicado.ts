@@ -89,6 +89,7 @@ export function indicarPlanoPessoas(
 export const ESTAGIOS_COM_INDICACAO = new Set([
   "trial_d5", "trial_d7", "trial_pos_1", "trial_pos_4", "trial_pos_8",
   "cortesia_encerrada", "grace_d_menos_3", "grace_d_menos_1", "grace_d0",
+  "wa_pos_fim_1", "wa_pos_fim_2",
 ]);
 
 export type DadosIndicacao = {

@@ -19015,6 +19015,7 @@ export type Database = {
           subscription_id: string
         }[]
       }
+      billing_feriado_bancario: { Args: { _d: string }; Returns: boolean }
       billing_regua_config_obter: { Args: never; Returns: Json }
       billing_regua_funil_pos_teste: { Args: { _dias?: number }; Returns: Json }
       billing_regua_historico: {
@@ -19223,6 +19224,29 @@ export type Database = {
       billing_v2_whatsapp_cobranca_obter: {
         Args: { _company_id: string }
         Returns: Json
+      }
+      billing_vencimento_util: { Args: { _d: string }; Returns: string }
+      billing_whatsapp_candidatos: {
+        Args: never
+        Returns: {
+          amount_cents: number
+          company_cnpj: string
+          company_email: string
+          company_id: string
+          company_name: string
+          company_trade_name: string
+          due_date: string
+          encerramento: string
+          fim: string
+          invoice_created_on: string
+          invoice_id: string
+          modulo: string
+          owner_user_id: string
+          payment_method: string
+          payment_url: string
+          subscription_id: string
+          tipo: string
+        }[]
       }
       can_use_module: {
         Args: {

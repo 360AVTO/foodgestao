@@ -4,6 +4,10 @@
 import { normalizeBRPhone } from "./zapi.ts";
 import { trechoIndicacao, type DadosIndicacao } from "./billing-plano-indicado.ts";
 import { prazoDoTeste } from "./billing-prazo-teste.ts";
+import {
+  feriadoBancario, WA_CARTAO_NAO_CONFIRMADO, WA_MENSALIDADE_EM_ABERTO, WA_MENSALIDADE_LEMBRETE,
+  WA_POS_FIM_1, WA_POS_FIM_2,
+} from "./billing-vencimento-util.ts";
 
 export type WaDados = DadosIndicacao & {
   nome?: string | null;
@@ -20,31 +24,48 @@ export type WaDados = DadosIndicacao & {
   modulo?: string;
   /** Dias que faltam para o fim do teste (avisos da reta final). */
   diasRestantes?: number;
+  /** Forma de pagamento da fatura (boleto, pix, card). */
+  forma?: string | null;
+  /** Fim do teste ("teste") ou da carência/cortesia ("carencia"). */
+  encerramento?: "teste" | "carencia";
 };
 
-/** Pós-teste: 3 tentativas, em dias corridos após o fim do teste. */
-export const POS_TESTE_DIAS = { trial_pos_1: 1, trial_pos_4: 4, trial_pos_8: 8 } as const;
+/**
+ * Estágios que têm WhatsApp. Mensalidade: no máximo 2 toques (lembrete antes do
+ * vencimento útil e, se seguir em aberto, 1 contato depois); cartão só se não
+ * confirmar; pós-teste/carência: 2 toques. Os demais estágios seguem só por e-mail.
+ */
+export const ESTAGIOS_WHATSAPP = [
+  "trial_d5", "trial_d7", "grace_d_menos_3", "grace_d0", "cortesia_encerrada", "oferta_plano",
+  WA_MENSALIDADE_LEMBRETE, WA_MENSALIDADE_EM_ABERTO, WA_CARTAO_NAO_CONFIRMADO, WA_POS_FIM_1, WA_POS_FIM_2,
+  "reativacao",
+] as const;
 
 export const ATENDIMENTO = "https://wa.me/5562992365959";
 
 /** Avisos que continuam válidos se o envio cair no próximo dia útil. */
-const ADIAVEIS = new Set([
-  "trial_pos_1", "trial_pos_4", "trial_pos_8", "reativacao", "oferta_plano", "cortesia_encerrada",
-  "d_mais_1", "d_mais_5", "d_mais_20", "d_mais_60",
-]);
+const ADIAVEIS = new Set(["reativacao", "oferta_plano", "cortesia_encerrada"]);
 
 const BRT_MS = 3 * 3600 * 1000; // Brasil sem horário de verão (UTC-3)
 const MIN = 60 * 1000;
 
 type Janela = [inicioMin: number, fimMin: number];
 /** Seg a sex, fora do pico do almoço e do jantar do food service. */
-const JANELAS_COMERCIAIS: Janela[] = [[9 * 60 + 30, 11 * 60], [15 * 60, 16 * 60 + 30]];
+const MANHA: Janela = [9 * 60 + 30, 11 * 60];
+const TARDE: Janela = [15 * 60, 16 * 60 + 30];
+const JANELAS_COMERCIAIS: Janela[] = [MANHA, TARDE];
+/** 1º toque de manhã (antes do almoço); o 2º à tarde (entre o almoço e o jantar). */
+const SO_MANHA = new Set<string>([WA_MENSALIDADE_LEMBRETE, WA_POS_FIM_1]);
+const SO_TARDE = new Set<string>([WA_MENSALIDADE_EM_ABERTO, WA_CARTAO_NAO_CONFIRMADO, WA_POS_FIM_2]);
 /** Confirmação de pagamento: todo dia, em horário civil. */
 const JANELAS_CONFIRMACAO: Janela[] = [[8 * 60, 20 * 60]];
 
-function janelasDo(stage: string, diaSemana: number): Janela[] {
+function janelasDo(stage: string, diaSemana: number, iso: string): Janela[] {
   if (stage === "reativacao") return JANELAS_CONFIRMACAO;
-  if (diaSemana === 0 || diaSemana === 6) return [];
+  // fim de semana e feriado nacional: silêncio total
+  if (diaSemana === 0 || diaSemana === 6 || feriadoBancario(iso)) return [];
+  if (SO_MANHA.has(stage)) return [MANHA];
+  if (SO_TARDE.has(stage)) return [TARDE];
   return JANELAS_COMERCIAIS;
 }
 
@@ -54,8 +75,8 @@ export function proximoEnvioWhatsapp(stage: string, agora: Date): Date {
   const meiaNoite = Date.UTC(local.getUTCFullYear(), local.getUTCMonth(), local.getUTCDate());
   for (let d = 0; d < 10; d++) {
     const diaUtc = meiaNoite + d * 24 * 3600 * 1000;
-    const semana = new Date(diaUtc).getUTCDay();
-    for (const [ini, fim] of janelasDo(stage, semana)) {
+    const dia = new Date(diaUtc);
+    for (const [ini, fim] of janelasDo(stage, dia.getUTCDay(), dia.toISOString().slice(0, 10))) {
       const inicio = diaUtc + ini * MIN + BRT_MS;
       const termino = diaUtc + fim * MIN + BRT_MS;
       if (agora.getTime() < termino) return new Date(Math.max(agora.getTime(), inicio));
@@ -144,23 +165,32 @@ function ultimoDiaTeste(d: WaDados, planos: string): string {
   return `${abertura}\n\n${ativar}${planos}\n\nPrecisa de apoio com a implantação na sua operação? ${RESPONDER[0].toUpperCase()}${RESPONDER.slice(1)}.`;
 }
 
-/** Texto do WhatsApp por estágio. `null` = estágio sem versão para WhatsApp. */
+/** Nome pelo qual o cliente conhece a empresa (nome fantasia, quando houver). */
+const comoSeChama = (d: WaDados) => `*${emp(d)}*`;
+/** Uma linha com o plano indicado (o link já abre com ele selecionado). */
+const planoCurto = (d: WaDados) =>
+  d.indicacao === "plano" && d.plano ? `\n\nPelo tamanho da equipe, o plano indicado é o *${d.plano}*.` : "";
+
+/** Texto do WhatsApp por estágio. `null` = estágio só por e-mail. */
 export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
   const pagar = d.link ? `\n👉 ${d.link}` : "";
   const planos = d.linkPlanos ? `\n👉 ${d.linkPlanos}` : "";
-  const exportar = d.linkExportacao ? `\n👉 ${d.linkExportacao}` : "";
   switch (stage) {
-    // ---------- teste grátis ----------
+    // ---------- teste grátis (reta final) ----------
     case "trial_d5":
       return avisoRetaFinal(d, planos);
     case "trial_d7":
       return ultimoDiaTeste(d, planos);
-    case "trial_pos_1":
-      return `${ola(d)} Tudo bem? O teste gratuito da *${emp(d)}* no AVETO 360 foi encerrado, mas todos os seus dados${d.indicacao === "sem_equipe" ? "" : ", colaboradores"} e cadastros continuam *100% salvos e seguros*.${ind(d)}\n\nPara não perder o ritmo da operação, você ativa ${d.indicacao === "plano" ? "o plano indicado" : "seu plano"} em 1 minuto, por Pix ou cartão:${planos}${rodape}`;
-    case "trial_pos_4":
-      return `${ola(d)} Sabemos como a rotina do restaurante é corrida.\n\nA contratação da *${emp(d)}* ainda não foi concluída. ${d.indicacao === "sem_equipe" ? "Ficou alguma dúvida para cadastrar a equipe?" : "Ficou alguma dúvida para seguir com a implantação?"}${d.indicacao === "sem_equipe" ? "" : ind(d)}\n\nAo ativar seu plano, nosso time apoia você na configuração inicial para você não perder tempo com digitação.${planos}${rodape}`;
-    case "trial_pos_8":
-      return `${ola(d)} Este é nosso último contato sobre o teste da *${emp(d)}*.\n\nSe o controle de folgas sem passivo e a clareza do caixa ainda são prioridade este mês, ainda dá tempo de reativar.${ind(d)}${planos}\n\nSe decidiu não seguir agora, tudo bem! Seus dados ficam guardados caso queira retomar. Um abraço da equipe AVETO 360.`;
+
+    // ---------- depois do fim do teste ou da carência: 2 toques ----------
+    case WA_POS_FIM_1: {
+      const acesso = d.encerramento === "carencia"
+        ? "Para reativar o acesso da equipe, com todos os dados salvos:"
+        : "Para manter o acesso liberado sem pausar a operação:";
+      return `${ola(d)} Tudo bem?\n\nPassando para saber como está a rotina da ${comoSeChama(d)} e se podemos te apoiar com a escala da equipe.${planoCurto(d)}\n\n${acesso}${planos}\n\nFicou alguma dúvida ou algo que possamos te ajudar por aí hoje?`;
+    }
+    case WA_POS_FIM_2:
+      return `${d.nome ? `Oi, ${d.nome}!` : "Oi!"}\n\nPassando para saber se ficou alguma dúvida sobre a escala ou se prefere conversar sobre o melhor formato para a ${comoSeChama(d)}.\n\nQuando quiser seguir, é por aqui:${planos}\n\nPodemos te ajudar com alguma coisa?`;
 
     // ---------- carência / cortesia ----------
     case "oferta_plano":
@@ -169,38 +199,20 @@ export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
       return `${ola(d)} A cortesia${mod(d)} da *${emp(d)}* no AVETO 360 foi encerrada. Liberamos uma carência até *${d.data ?? "os próximos dias"}* para você escolher um plano sem interrupção.${ind(d)}${planos}${rodape}`;
     case "grace_d_menos_3":
       return `${ola(d)} A carência${mod(d)} da *${emp(d)}* termina em *${d.data ?? "3 dias"}*.${ind(d)}\n\nPara manter o acesso, ${escolha(d, "escolha um plano")}:${planos}${rodape}`;
-    case "grace_d_menos_1":
-      return `${ola(d)} Amanhã (${d.data ?? ""}) termina a carência${mod(d)} da *${emp(d)}*. Depois disso o acesso fica pausado até a contratação.${ind(d)}${planos}${rodape}`;
     case "grace_d0":
       return `${ola(d)} Hoje é o último dia da carência${mod(d)} da *${emp(d)}*. A partir de amanhã o acesso fica pausado, com os dados guardados.${ind(d)}${planos}${rodape}`;
 
-    // ---------- mensalidade ----------
-    case "d_menos_3":
-      return `${ola(d)} A mensalidade do AVETO 360 da *${emp(d)}*, de *${val(d)}*, vence em *${d.data ?? "breve"}*. Pague por Pix, boleto ou cartão:${pagar}\n\nSe já pagou, desconsidere.`;
-    case "d_0":
-      return `${ola(d)} A mensalidade da *${emp(d)}*, de *${val(d)}*, vence hoje. Pague por Pix, boleto ou cartão:${pagar}\n\nSe já pagou, desconsidere.`;
-    case "d_mais_1":
-      return `${ola(d)} Ainda não identificamos o pagamento da fatura de *${val(d)}*, vencida em ${d.data ?? "—"}. O acesso continua normal. Regularize por aqui:${pagar}${rodape}`;
-    case "d_mais_5":
-      return `${ola(d)} Lembrete: a fatura de *${val(d)}* da *${emp(d)}*, vencida em ${d.data ?? "—"}, segue em aberto. O acesso da equipe continua liberado:${pagar}${rodape}`;
-    case "d_mais_8":
-      return `${ola(d)} A fatura de *${val(d)}* está em atraso há 8 dias. Para evitar a pausa do acesso da *${emp(d)}* em *${d.dataSuspensao ?? "3 dias"}*, pague até lá:${pagar}\n\nO Portal do Colaborador continua disponível para a equipe.`;
-    case "d_mais_10":
-      return `${ola(d)} Se o pagamento da fatura de *${val(d)}* não for identificado até amanhã, o acesso operacional da *${emp(d)}* será pausado:${pagar}${rodape}`;
-    case "d_mais_11":
-      return `${ola(d)} O acesso operacional da *${emp(d)}* foi pausado por pendência na fatura de *${val(d)}*. Os dados estão preservados e o acesso volta automaticamente após o pagamento:${pagar}`;
-    case "d_mais_20":
-      return `${ola(d)} O acesso da *${emp(d)}* segue pausado pela fatura de *${val(d)}*. Sem a quitação, o contrato será encerrado em *${d.dataRescisao ?? "—"}*:${pagar}${rodape}`;
-    case "d_mais_28":
-      return `${ola(d)} Em 3 dias (${d.dataRescisao ?? "—"}) o contrato da *${emp(d)}* será encerrado por pendência na fatura de *${val(d)}*. Para manter o contrato:${pagar}${rodape}`;
-    case "d_mais_31":
-      return `${ola(d)} Enviamos por e-mail a notificação formal de encerramento do contrato da *${emp(d)}*. Os dados ficam disponíveis para exportação até *${d.dataExpiracao ?? "—"}*. Para regularizar e reativar:${pagar}`;
-    case "d_mais_60":
-      return `${ola(d)} Os dados da *${emp(d)}* seguem disponíveis para exportação até *${d.dataExpiracao ?? "—"}*:${exportar}${rodape}`;
-    case "d_mais_80":
-      return `${ola(d)} Últimos 10 dias: em *${d.dataExpiracao ?? "breve"}* os dados da *${emp(d)}* deixam de estar disponíveis. Exporte agora:${exportar}${rodape}`;
-    case "d_mais_90":
-      return `${ola(d)} O prazo de guarda dos dados da *${emp(d)}* foi encerrado. Se quiser voltar ao AVETO 360, é só escolher um plano:${planos}`;
+    // ---------- mensalidade: no máximo 2 toques ----------
+    case WA_MENSALIDADE_LEMBRETE:
+      return `${ola(d)} Tudo bem?\n\nDeixo aqui o link da mensalidade do AVETO 360 da ${comoSeChama(d)} para facilitar seu dia:${pagar}\n\nA escala e os cadastros da equipe estão rodando certinho por aí?`;
+    case WA_MENSALIDADE_EM_ABERTO: {
+      const pergunta = d.forma === "pix"
+        ? "Teve alguma dificuldade com o Pix ou prefere pagar por boleto?"
+        : "Teve alguma dificuldade com o boleto ou precisa de uma 2ª via por aqui?";
+      return `${d.nome ? `Oi, ${d.nome}!` : "Oi!"}\n\nA fatura do AVETO 360 da ${comoSeChama(d)} segue em aberto, mas o acesso da equipe continua 100% liberado.\n\nPara regularizar quando puder:${pagar}\n\n${pergunta}`;
+    }
+    case WA_CARTAO_NAO_CONFIRMADO:
+      return `${d.nome ? `Oi, ${d.nome}!` : "Oi!"}\n\nNão conseguimos confirmar no cartão a mensalidade do AVETO 360 da ${comoSeChama(d)}, mas o acesso da equipe continua 100% liberado.\n\nSe preferir, dá para pagar por Pix ou boleto aqui:${pagar}\n\nQuer ajuda para atualizar o cartão por aqui?`;
 
     // ---------- confirmação ----------
     case "reativacao":

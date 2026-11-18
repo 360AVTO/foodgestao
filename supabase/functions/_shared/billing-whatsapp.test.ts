@@ -1,14 +1,11 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  destinosWhatsapp, mensagemWhatsapp, POS_TESTE_DIAS, proximoEnvioWhatsapp, validadeWhatsapp,
+  destinosWhatsapp, ESTAGIOS_WHATSAPP, mensagemWhatsapp, proximoEnvioWhatsapp, validadeWhatsapp,
 } from "./billing-whatsapp.ts";
 
 // Horários em Brasília (UTC-3)
 const brt = (iso: string) => new Date(`${iso}-03:00`);
 
-Deno.test("pós-teste tem 3 tentativas: D+1, D+4 e D+8", () => {
-  assertEquals(Object.values(POS_TESTE_DIAS), [1, 4, 8]);
-});
 
 Deno.test("antes das 9h30 de um dia útil espera a janela da manhã", () => {
   // 18/11/2026 é quarta-feira
@@ -17,20 +14,32 @@ Deno.test("antes das 9h30 de um dia útil espera a janela da manhã", () => {
 
 Deno.test("dentro da janela envia na hora", () => {
   const agora = brt("2026-11-18T10:15:00");
-  assertEquals(proximoEnvioWhatsapp("trial_pos_1", agora).getTime(), agora.getTime());
+  assertEquals(proximoEnvioWhatsapp("wa_pos_fim_1", agora).getTime(), agora.getTime());
 });
 
 Deno.test("entre 11h e 15h espera a janela da tarde", () => {
-  assertEquals(proximoEnvioWhatsapp("trial_pos_4", brt("2026-11-18T12:00:00")).toISOString(), brt("2026-11-18T15:00:00").toISOString());
+  assertEquals(proximoEnvioWhatsapp("trial_d5", brt("2026-11-18T12:00:00")).toISOString(), brt("2026-11-18T15:00:00").toISOString());
 });
 
 Deno.test("sábado e domingo ficam para segunda às 9h30", () => {
   // 21/11/2026 é sábado
-  assertEquals(proximoEnvioWhatsapp("trial_pos_1", brt("2026-11-21T08:00:00")).toISOString(), brt("2026-11-23T09:30:00").toISOString());
+  assertEquals(proximoEnvioWhatsapp("trial_d5", brt("2026-11-21T08:00:00")).toISOString(), brt("2026-11-23T09:30:00").toISOString());
 });
 
 Deno.test("depois das 16h30 de sexta vai para segunda", () => {
-  assertEquals(proximoEnvioWhatsapp("trial_pos_8", brt("2026-11-20T17:00:00")).toISOString(), brt("2026-11-23T09:30:00").toISOString());
+  assertEquals(proximoEnvioWhatsapp("trial_d5", brt("2026-11-27T17:00:00")).toISOString(), brt("2026-11-30T09:30:00").toISOString());
+});
+
+Deno.test("feriado nacional é silêncio: 20/11/2026 (sexta) passa para segunda 23/11", () => {
+  assertEquals(proximoEnvioWhatsapp("trial_d5", brt("2026-11-20T08:00:00")).toISOString(), brt("2026-11-23T09:30:00").toISOString());
+});
+
+Deno.test("1º toque só de manhã; 2º toque só à tarde", () => {
+  assertEquals(proximoEnvioWhatsapp("wa_mensalidade_lembrete", brt("2026-11-18T12:00:00")).toISOString(), brt("2026-11-19T09:30:00").toISOString());
+  assertEquals(proximoEnvioWhatsapp("wa_pos_fim_1", brt("2026-11-18T15:30:00")).toISOString(), brt("2026-11-19T09:30:00").toISOString());
+  assertEquals(proximoEnvioWhatsapp("wa_mensalidade_em_aberto", brt("2026-11-18T10:00:00")).toISOString(), brt("2026-11-18T15:00:00").toISOString());
+  assertEquals(proximoEnvioWhatsapp("wa_pos_fim_2", brt("2026-11-18T10:00:00")).toISOString(), brt("2026-11-18T15:00:00").toISOString());
+  assertEquals(proximoEnvioWhatsapp("wa_cartao_nao_confirmado", brt("2026-11-18T10:00:00")).toISOString(), brt("2026-11-18T15:00:00").toISOString());
 });
 
 Deno.test("confirmação de pagamento sai todo dia entre 8h e 20h", () => {
@@ -43,9 +52,9 @@ Deno.test("aviso com data do dia vale só até o fim do dia em Brasília", () =>
   assertEquals(validadeWhatsapp("d_0", brt("2026-11-21T08:00:00")).toISOString(), brt("2026-11-21T23:59:59.999").toISOString());
 });
 
-Deno.test("tentativas do pós-teste podem esperar até 3 dias", () => {
+Deno.test("oferta do plano pode esperar até 3 dias", () => {
   const criado = brt("2026-11-21T08:00:00");
-  assertEquals(validadeWhatsapp("trial_pos_1", criado).getTime() - criado.getTime(), 3 * 24 * 3600 * 1000);
+  assertEquals(validadeWhatsapp("oferta_plano", criado).getTime() - criado.getTime(), 3 * 24 * 3600 * 1000);
 });
 
 Deno.test("destinatários: dono e financeiro, sem repetir o mesmo número", () => {
@@ -55,13 +64,38 @@ Deno.test("destinatários: dono e financeiro, sem repetir o mesmo número", () =
   assertEquals(destinosWhatsapp({ telefone: "123" }, { telefone: null }).length, 0);
 });
 
-Deno.test("todos os estágios da régua têm mensagem de WhatsApp", () => {
-  for (const s of ["trial_d5", "trial_d7", "trial_pos_1", "trial_pos_4", "trial_pos_8", "cortesia_encerrada",
-    "grace_d_menos_3", "grace_d_menos_1", "grace_d0", "d_menos_3", "d_0", "d_mais_1", "d_mais_5", "d_mais_8",
-    "d_mais_10", "d_mais_11", "d_mais_20", "d_mais_28", "d_mais_31", "d_mais_60", "d_mais_80", "d_mais_90", "reativacao"]) {
-    assert(mensagemWhatsapp(s, { empresa: "X" }), s);
+Deno.test("só os toques combinados têm WhatsApp; o resto da régua segue por e-mail", () => {
+  for (const s of ESTAGIOS_WHATSAPP) assert(mensagemWhatsapp(s, { empresa: "X" }), s);
+  for (const s of ["d_menos_3", "d_0", "d_mais_1", "d_mais_5", "d_mais_8", "d_mais_10", "d_mais_11", "d_mais_20",
+    "d_mais_28", "d_mais_31", "d_mais_60", "d_mais_80", "d_mais_90", "trial_pos_1", "trial_pos_4", "trial_pos_8",
+    "grace_d_menos_1", "desconhecido"]) {
+    assertEquals(mensagemWhatsapp(s, { empresa: "X" }), null, s);
   }
-  assertEquals(mensagemWhatsapp("desconhecido", {}), null);
+});
+
+const linhas = (t: string) => t.split("\n");
+Deno.test("mensagens curtas: respiro depois da saudação e pergunta no final", () => {
+  const d = { nome: "Maria", empresa: "RANCHO 330", link: "https://x/pagar", linkPlanos: "https://x/planos" };
+  for (const s of ["wa_mensalidade_lembrete", "wa_mensalidade_em_aberto", "wa_cartao_nao_confirmado", "wa_pos_fim_1", "wa_pos_fim_2"]) {
+    const t = mensagemWhatsapp(s, d)!;
+    assert(/^(Olá|Oi), Maria!/.test(t), s);
+    assertEquals(linhas(t)[1], "", s);
+    assert(t.trim().endsWith("?"), s);
+    assert(t.includes("*RANCHO 330*"), s);
+    assert(t.length < 400, `${s}: ${t.length}`);
+  }
+});
+
+Deno.test("em aberto: pergunta muda conforme boleto ou Pix e reforça que o acesso continua", () => {
+  const boleto = mensagemWhatsapp("wa_mensalidade_em_aberto", { empresa: "X", forma: "boleto" })!;
+  const pix = mensagemWhatsapp("wa_mensalidade_em_aberto", { empresa: "X", forma: "pix" })!;
+  assert(boleto.includes("2ª via") && boleto.includes("100% liberado"));
+  assert(pix.includes("Pix") && !pix.includes("2ª via"));
+});
+
+Deno.test("pós-carência fala em reativar; pós-teste em manter o acesso", () => {
+  assert(mensagemWhatsapp("wa_pos_fim_1", { empresa: "X", encerramento: "carencia" })!.includes("reativar"));
+  assert(mensagemWhatsapp("wa_pos_fim_1", { empresa: "X", encerramento: "teste" })!.includes("manter o acesso"));
 });
 
 Deno.test("destinatários: dono e administradores recebem, cada número uma vez", () => {

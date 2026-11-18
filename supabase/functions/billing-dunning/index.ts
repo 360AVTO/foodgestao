@@ -22,6 +22,9 @@ import {
   mensagemWhatsapp, proximoEnvioWhatsapp, validadeWhatsapp,
 } from "../_shared/billing-whatsapp.ts";
 import { destinosWhatsappCobranca, whatsappReguaAtivo } from "../_shared/billing-whatsapp-envio.ts";
+import {
+  hojeBRT, type Marco, marcoWhatsappFatura, marcoWhatsappPosFim, respeitaIntervalo,
+} from "../_shared/billing-vencimento-util.ts";
 import { checkZapiStatus, sendZapiText } from "../_shared/zapi.ts";
 import {
   ESTAGIOS_COM_INDICACAO, indicarPlanoPessoas, type IndicacaoPlano, type PlanoComPreco,
@@ -81,6 +84,26 @@ type ScanRow = {
   company_cnpj: string | null;
   company_email: string | null;
   payment_url: string | null;
+  modulo: string | null;
+};
+
+type CandidatoWa = {
+  tipo: "fatura" | "pos_fim";
+  company_id: string;
+  subscription_id: string;
+  invoice_id: string | null;
+  amount_cents: number | null;
+  due_date: string | null;
+  invoice_created_on: string | null;
+  payment_method: string | null;
+  payment_url: string | null;
+  fim: string | null;
+  encerramento: "teste" | "carencia" | null;
+  owner_user_id: string;
+  company_name: string | null;
+  company_trade_name: string | null;
+  company_cnpj: string | null;
+  company_email: string | null;
   modulo: string | null;
 };
 
@@ -312,6 +335,78 @@ Deno.serve(async (req) => {
       }
     }
 
+    // ---------- 1b) toques de relacionamento no WhatsApp ------------------
+    // Mensalidade: lembrete 2 dias úteis antes do vencimento útil e, se seguir em aberto,
+    // 1 contato 4 dias úteis depois; cartão só se não confirmar. Pós-teste/carência: 2 toques.
+    // Nunca dois WhatsApps da régua em dias seguidos para o mesmo número.
+    let waRelacionamento = 0;
+    if (waAtivo) {
+      const { data: cands, error: candErr } = await admin.rpc("billing_whatsapp_candidatos");
+      if (candErr) console.error("[billing-dunning] candidatos:", candErr.code, candErr.message);
+      const agora = new Date();
+      const hoje = hojeBRT(agora);
+      for (const c of (cands ?? []) as CandidatoWa[]) {
+        const marco: Marco | null = c.tipo === "fatura" && c.due_date
+          ? marcoWhatsappFatura({ vencimento: c.due_date, forma: c.payment_method, criadaEm: c.invoice_created_on }, hoje)
+          : c.tipo === "pos_fim" && c.fim ? marcoWhatsappPosFim(c.fim, hoje) : null;
+        if (!marco) continue;
+        const quando = proximoEnvioWhatsapp(marco.stage, agora);
+        if (quando.getTime() > marco.validoAte.getTime()) continue; // perderia o sentido até a próxima janela
+
+        const row: ScanRow = {
+          company_id: c.company_id, subscription_id: c.subscription_id, invoice_id: c.invoice_id,
+          stage: marco.stage, dias: marco.dias, amount_cents: c.amount_cents,
+          due_date: c.tipo === "fatura" ? c.due_date : c.fim, expira_em: null,
+          owner_user_id: c.owner_user_id, company_name: c.company_trade_name || c.company_name,
+          company_cnpj: c.company_cnpj, company_email: c.company_email, payment_url: c.payment_url, modulo: c.modulo,
+        };
+        const indicacao = c.tipo === "pos_fim" ? await indicacaoDe(row) : {};
+        const numeros = await destinosWhatsappCobranca(admin, c.company_id, c.owner_user_id);
+        for (const n of numeros) {
+          // mesmo toque já feito para este número nesta empresa (ex.: os dois módulos)
+          if (!c.invoice_id) {
+            const { count } = await admin.from("billing_notifications")
+              .select("id", { count: "exact", head: true })
+              .eq("company_id", c.company_id).eq("stage", marco.stage)
+              .eq("channel", "whatsapp").eq("recipient", n.phone)
+              .gte("created_at", new Date(agora.getTime() - 15 * 24 * 3600 * 1000).toISOString());
+            if ((count ?? 0) > 0) continue;
+          }
+          const { data: recentes } = await admin.from("billing_notifications")
+            .select("sent_at, scheduled_at")
+            .eq("channel", "whatsapp").eq("recipient", n.phone).neq("stage", "reativacao")
+            .in("status", ["pending", "sent"])
+            .gte("scheduled_at", new Date(quando.getTime() - 3 * 24 * 3600 * 1000).toISOString())
+            .limit(50);
+          const datas = (recentes ?? []).map((r: { sent_at: string | null; scheduled_at: string }) =>
+            new Date(String(r.sent_at ?? r.scheduled_at)));
+          if (!respeitaIntervalo(quando, datas)) continue;
+
+          const { error } = await admin.from("billing_notifications").insert({
+            company_id: c.company_id,
+            subscription_id: c.subscription_id,
+            invoice_id: c.invoice_id,
+            stage: marco.stage,
+            channel: "whatsapp",
+            recipient: n.phone,
+            payload: {
+              ...dadosDoEstagio(row, n.nome),
+              ...indicacao,
+              forma: c.payment_method,
+              encerramento: c.encerramento ?? undefined,
+              papel: n.papel,
+              wa_valido_ate: marco.validoAte.toISOString(),
+            },
+            scheduled_at: quando.toISOString(),
+          });
+          if (!error) { enfileirados++; waRelacionamento++; }
+          else if (error.code !== "23505") {
+            console.error("[billing-dunning] enqueue relacionamento:", error.code, error.message);
+          }
+        }
+      }
+    }
+
     // ---------- 2) drenagem da fila ---------------------------------------
     const { data: fila, error: filaErr } = await admin.from("billing_notifications")
       .select("id, company_id, stage, channel, recipient, invoice_id, subscription_id, payload, attempts")
@@ -378,7 +473,7 @@ Deno.serve(async (req) => {
       }
 
       // pós-teste: plano contratado antes do envio encerra as tentativas
-      if (String(item.stage).startsWith("trial_pos_")) {
+      if (String(item.stage).startsWith("trial_pos_") || String(item.stage).startsWith("wa_pos_fim_")) {
         const { count } = await admin.from("subscriptions")
           .select("id", { count: "exact", head: true })
           .eq("company_id", item.company_id).eq("asaas_env", "production")
@@ -480,7 +575,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return json({ ok: true, whatsapp_ativo: waAtivo, alvos: (alvos ?? []).length, enfileirados, enviados, whatsapp_enviados: waEnviados, cancelados, falhas });
+    return json({ ok: true, whatsapp_ativo: waAtivo, alvos: (alvos ?? []).length, whatsapp_relacionamento: waRelacionamento, enfileirados, enviados, whatsapp_enviados: waEnviados, cancelados, falhas });
   } catch (e) {
     console.error("[billing-dunning]", e instanceof Error ? e.message : e);
     return json({ ok: false, error: "Falha na régua de cobrança" }, 500);

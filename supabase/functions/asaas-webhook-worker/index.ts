@@ -266,7 +266,7 @@ async function processEvent(admin: Admin, env: Env, eventType: string, payload: 
         const method =
           billingType === "PIX" ? "pix" :
           billingType === "BOLETO" ? "boleto" :
-          billingType === "CREDIT_CARD" ? "credit_card" : null;
+          billingType === "CREDIT_CARD" ? "card" : null;
         const { data: inserted, error: insErr } = await admin.from("invoices").insert({
           subscription_id: (subRow as any).id,
           user_id: (subRow as any).user_id,

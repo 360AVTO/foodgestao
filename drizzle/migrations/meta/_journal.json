@@ -1765,6 +1765,13 @@
       "when": 1795016656041,
       "tag": "0251_desconto_negociado_cobranca",
       "breakpoints": true
+    },
+    {
+      "idx": 252,
+      "version": "7",
+      "when": 1795026158435,
+      "tag": "0252_regua_whatsapp_vencimento_util",
+      "breakpoints": true
     }
   ]
 }

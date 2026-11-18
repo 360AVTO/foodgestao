@@ -70,6 +70,11 @@ const ESTAGIOS: Record<string, string> = {
   grace_d_menos_3: "Carência · Faltam 3 dias",
   grace_d_menos_1: "Carência · Último dia amanhã",
   grace_d0: "Carência · Termina hoje",
+  wa_mensalidade_lembrete: "WhatsApp · Lembrete (2 dias úteis antes)",
+  wa_mensalidade_em_aberto: "WhatsApp · Em aberto (4 dias úteis depois)",
+  wa_cartao_nao_confirmado: "WhatsApp · Cartão não confirmado",
+  wa_pos_fim_1: "WhatsApp · Pós-fim D+2",
+  wa_pos_fim_2: "WhatsApp · Pós-fim D+6",
 };
 
 type Config = { whatsapp_ativo: boolean; atualizado_em: string | null; atualizado_por: string | null };
