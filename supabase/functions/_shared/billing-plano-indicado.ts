@@ -31,16 +31,29 @@ function numero(features: PlanoCatalogo["features"], chave: string): number | nu
   return Number.isFinite(v) && v > 0 ? v : null;
 }
 
+/** Desconto negociado ainda a contratar (percentual sobre a mensalidade nas N primeiras). */
+export type DescontoIndicacao = { percentual: number; mensalidades: number };
+
+const pctTexto = (p: number) => `${String(Number(p)).replace(".", ",")}%`;
+const comPct = (c: number, p: number) => Math.round((c * (100 - p)) / 100);
+const primeiras = (n: number) => (n === 1 ? "na primeira mensalidade" : `nas ${n} primeiras mensalidades`);
+
 /** Texto curto do preço: fixo ("R$ 89,90/mês, até 8 colaboradores") ou por colaborador com estimativa. */
-export function detalheDoPlano(p: PlanoComPreco, colaboradores: number): string {
+export function detalheDoPlano(p: PlanoComPreco, colaboradores: number, desconto?: DescontoIndicacao | null): string {
+  const d = desconto && desconto.percentual > 0 && desconto.mensalidades > 0 ? desconto : null;
   if (planoPorColaborador(p)) {
     const unit = numero(p.features, "price_per_collaborator_cents") ?? 0;
-    const estimativa = Math.max(colaboradores, minimoEnterprise(p)) * unit;
-    return `${reais(unit)} por colaborador ativo, hoje cerca de ${reais(estimativa)}/mês`;
+    const qtd = Math.max(colaboradores, minimoEnterprise(p));
+    const base = `${reais(unit)} por colaborador ativo, hoje cerca de ${reais(qtd * unit)}/mês`;
+    if (!d) return base;
+    const unitD = comPct(unit, d.percentual);
+    return `${base}; com o desconto negociado de ${pctTexto(d.percentual)}, ${reais(unitD)} por colaborador (cerca de ${reais(qtd * unitD)}/mês) ${primeiras(d.mensalidades)}`;
   }
-  const partes = [`${reais(Number(p.price_monthly_cents ?? 0))}/mês`];
+  const mensal = Number(p.price_monthly_cents ?? 0);
+  const partes = [`${reais(mensal)}/mês`];
   const maxColab = numero(p.features, "max_collaborators");
   if (maxColab) partes.push(`até ${maxColab} colaboradores`);
+  if (d) partes.push(`com o desconto negociado de ${pctTexto(d.percentual)}, ${reais(comPct(mensal, d.percentual))}/mês ${primeiras(d.mensalidades)}`);
   return partes.join(", ");
 }
 
@@ -53,6 +66,7 @@ export function indicarPlanoPessoas(
   planos: PlanoComPreco[],
   equipe: { colaboradores: number; unidades?: number | null },
   site = SITE_URL,
+  desconto?: DescontoIndicacao | null,
 ): IndicacaoPlano | null {
   const colaboradores = Math.max(0, Math.floor(Number(equipe.colaboradores) || 0));
   const geral = `${site}/planos`;
@@ -66,7 +80,7 @@ export function indicarPlanoPessoas(
     colaboradores,
     slug: p.slug,
     plano: p.name,
-    detalhePlano: detalheDoPlano(p, colaboradores),
+    detalhePlano: detalheDoPlano(p, colaboradores, desconto),
     linkPlanos: `${site}/planos?plano=${encodeURIComponent(p.slug)}`,
   };
 }

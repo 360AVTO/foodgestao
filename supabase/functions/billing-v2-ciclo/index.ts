@@ -5,7 +5,7 @@
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { serviceClient } from "../_shared/authz.ts";
 import { secretMatches } from "../_shared/secret.ts";
-import { aplicarPendentes, apurarExcedentes, conciliar, simularExcedentes } from "../_shared/billing-v2-ciclo.ts";
+import { aplicarPendentes, apurarExcedentes, conciliar, encerrarDescontosVencidos, simularExcedentes } from "../_shared/billing-v2-ciclo.ts";
 
 const json = (b: unknown, status = 200) =>
   new Response(JSON.stringify(b), { status, headers: { ...corsHeaders, "Content-Type": "application/json" } });
@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
   const body = await req.json().catch(() => ({})) as Record<string, any>;
   const somenteTeste = body.somente_teste === true;
   const simular = body.simular === true;
-  const etapas: string[] = body.etapas ?? ["excedentes", "pendencias", "conciliacao"];
+  const etapas: string[] = body.etapas ?? ["descontos", "excedentes", "pendencias", "conciliacao"];
   const admin = serviceClient();
   const out: Record<string, unknown> = {};
 
@@ -42,6 +42,13 @@ Deno.serve(async (req) => {
     const modo = typeof (p as any)?.value === "string" ? (p as any).value : "legado";
     cobrancaLiberada = modo === "v2";
     out.checkout_v2 = modo;
+  }
+
+  // Fim do desconto negociado: mensalidade volta ao valor de tabela (antes do excedente do mês).
+  if (etapas.includes("descontos") && contaIds.length) {
+    out.descontos = simular || cobrancaLiberada
+      ? { simulacao: simular, resultado: await encerrarDescontosVencidos(admin, contaIds, simular) }
+      : { ignorado: "checkout_v2 diferente de 'v2' em produção" };
   }
 
   if (etapas.includes("excedentes") && contaIds.length) {

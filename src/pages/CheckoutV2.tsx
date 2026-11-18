@@ -16,6 +16,7 @@ import { buscarLimites } from "@/lib/billing/limites";
 import { avisoPlanoAbaixoDaEquipe, enquadrarPlanoPessoas, minimoEnterprise, planoPorColaborador, type EquipeEmpresa, type PlanoCatalogo } from "@/lib/billing/enquadramentoPlano";
 import { useEnterpriseElegibilidade } from "@/hooks/useEnterpriseElegibilidade";
 import { cn } from "@/lib/utils";
+import { resumoDescontoNegociado, type DescontoNegociadoInfo } from "@/lib/billing/descontoNegociado";
 import { toast } from "sonner";
 import { AlertTriangle, Check, MessageCircle } from "lucide-react";
 
@@ -495,6 +496,11 @@ export default function CheckoutV2() {
                 ))}
                 {(cotacao.data.erros ?? []).map((e: string) => <p key={e} className="text-xs text-destructive">{e}</p>)}
                 {(cotacao.data.sugestoes_upgrade ?? []).map((s: Json) => <p key={s.para} className="text-xs text-muted-foreground">{s.mensagem}</p>)}
+                {((cotacao.data.descontos_comerciais ?? []) as DescontoNegociadoInfo[]).map((d) => (
+                  <p key={d.id} className="rounded-md bg-muted p-2 text-xs" data-testid="desconto-negociado">
+                    {resumoDescontoNegociado(d, d.modulo === "pessoas")}
+                  </p>
+                ))}
                 <div className="flex justify-between border-t pt-2 font-semibold">
                   <span>Total {ciclo === "anual" ? "do ano" : "por mês"}</span>
                   <span data-testid="total">{formatCents(cotacao.data.total_ciclo_cents)}</span>

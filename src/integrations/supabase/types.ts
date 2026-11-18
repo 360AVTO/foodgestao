@@ -1966,6 +1966,84 @@ export type Database = {
           },
         ]
       }
+      billing_v2_descontos_negociados: {
+        Row: {
+          aplicado_em: string | null
+          billing_account_id: string
+          competencia_final: string | null
+          competencia_inicial: string | null
+          created_at: string
+          criado_por: string | null
+          encerrado_em: string | null
+          id: string
+          mensalidades: number
+          module: string
+          motivo: string
+          percentual: number
+          primeiro_vencimento: string | null
+          revogado_em: string | null
+          revogado_motivo: string | null
+          revogado_por: string | null
+          subscription_id: string | null
+          ultimo_vencimento_com_desconto: string | null
+        }
+        Insert: {
+          aplicado_em?: string | null
+          billing_account_id: string
+          competencia_final?: string | null
+          competencia_inicial?: string | null
+          created_at?: string
+          criado_por?: string | null
+          encerrado_em?: string | null
+          id?: string
+          mensalidades: number
+          module: string
+          motivo: string
+          percentual: number
+          primeiro_vencimento?: string | null
+          revogado_em?: string | null
+          revogado_motivo?: string | null
+          revogado_por?: string | null
+          subscription_id?: string | null
+          ultimo_vencimento_com_desconto?: string | null
+        }
+        Update: {
+          aplicado_em?: string | null
+          billing_account_id?: string
+          competencia_final?: string | null
+          competencia_inicial?: string | null
+          created_at?: string
+          criado_por?: string | null
+          encerrado_em?: string | null
+          id?: string
+          mensalidades?: number
+          module?: string
+          motivo?: string
+          percentual?: number
+          primeiro_vencimento?: string | null
+          revogado_em?: string | null
+          revogado_motivo?: string | null
+          revogado_por?: string | null
+          subscription_id?: string | null
+          ultimo_vencimento_com_desconto?: string | null
+        }
+        Relationships: [
+          {
+            foreignKeyName: "billing_v2_descontos_negociados_billing_account_id_fkey"
+            columns: ["billing_account_id"]
+            isOneToOne: false
+            referencedRelation: "billing_accounts"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "billing_v2_descontos_negociados_subscription_id_fkey"
+            columns: ["subscription_id"]
+            isOneToOne: false
+            referencedRelation: "subscriptions"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       billing_v2_desfeita_eventos: {
         Row: {
           alerta: boolean
@@ -18527,6 +18605,35 @@ export type Database = {
         Args: { _billing_account_id: string; _company_id?: string }
         Returns: number
       }
+      _billing_v2_desconto_para_cotacao: {
+        Args: { _billing_account_id: string; _module: string }
+        Returns: {
+          aplicado_em: string | null
+          billing_account_id: string
+          competencia_final: string | null
+          competencia_inicial: string | null
+          created_at: string
+          criado_por: string | null
+          encerrado_em: string | null
+          id: string
+          mensalidades: number
+          module: string
+          motivo: string
+          percentual: number
+          primeiro_vencimento: string | null
+          revogado_em: string | null
+          revogado_motivo: string | null
+          revogado_por: string | null
+          subscription_id: string | null
+          ultimo_vencimento_com_desconto: string | null
+        }
+        SetofOptions: {
+          from: "*"
+          to: "billing_v2_descontos_negociados"
+          isOneToOne: true
+          isSetofReturn: false
+        }
+      }
       _billing_v2_enterprise_bloqueio: {
         Args: {
           _billing_account_id: string
@@ -18708,6 +18815,24 @@ export type Database = {
       }
       admin_concierge_renovar_convite: {
         Args: { p_company_id: string }
+        Returns: Json
+      }
+      admin_desconto_negociado_registrar: {
+        Args: {
+          _billing_account_id: string
+          _mensalidades: number
+          _module: string
+          _motivo: string
+          _percentual: number
+        }
+        Returns: string
+      }
+      admin_desconto_negociado_revogar: {
+        Args: { _id: string; _motivo: string }
+        Returns: undefined
+      }
+      admin_descontos_negociados_lista: {
+        Args: { _billing_account_id: string }
         Returns: Json
       }
       admin_faturas_lista: { Args: { p_escopo?: string }; Returns: Json }
@@ -19006,6 +19131,10 @@ export type Database = {
         Returns: undefined
       }
       billing_v2_expirar_carencias: { Args: never; Returns: number }
+      billing_v2_meus_descontos_negociados: {
+        Args: { _company_id: string }
+        Returns: Json
+      }
       billing_v2_minha_assinatura: {
         Args: { _company_id: string }
         Returns: Json

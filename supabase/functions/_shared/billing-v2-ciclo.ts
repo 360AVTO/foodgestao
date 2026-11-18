@@ -3,8 +3,25 @@
 // Ambiente do Asaas SEMPRE vem do registro (asaas_env), nunca do chamador.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { asaasFetch, parseAsaasEnv } from "./asaas.ts";
-import { ASAAS_MINIMO_CENTS, cortesiaIntegral, type Criados } from "./billing-v2.ts";
+import { ASAAS_MINIMO_CENTS, atualizarValorAsaas, cortesiaIntegral, type Criados } from "./billing-v2.ts";
 import { precoExcedenteColaborador } from "./billing-excedente-preco.ts";
+import { comDesconto, hojeBrasilia, mensalidadeDeveVoltar, percentualExcedente, type DescontoNegociado } from "./billing-desconto-negociado.ts";
+
+/** Desconto negociado amarrado à assinatura (o mais recente). */
+async function descontoDaAssinatura(admin: SupabaseClient, subId: string): Promise<DescontoNegociado | null> {
+  const { data } = await admin.from("billing_v2_descontos_negociados").select("*")
+    .eq("subscription_id", subId).order("created_at", { ascending: false }).limit(1).maybeSingle();
+  return (data as DescontoNegociado | null) ?? null;
+}
+
+/** Preço do excedente da competência, já com o desconto negociado quando a competência está na janela. */
+async function precoExcedente(admin: SupabaseClient, sub: any, comp: string) {
+  const { data: ad } = await admin.from("plan_addons").select("price_cents").eq("module", "pessoas").eq("code", "colaboradores").single();
+  const { data: pl } = await admin.from("plans").select("features").eq("id", sub.plan_id).maybeSingle();
+  const tabela = precoExcedenteColaborador(pl?.features, ad?.price_cents);
+  const pct = percentualExcedente(await descontoDaAssinatura(admin, sub.id), comp);
+  return { unit: pct > 0 ? comDesconto(tabela, pct) : tabela, tabela, pct };
+}
 
 const reais = (c: number) => Math.round(c) / 100;
 const hoje = (d = 0) => new Date(Date.now() + d * 86400000).toISOString().slice(0, 10);
@@ -69,12 +86,11 @@ export async function simularExcedentes(admin: SupabaseClient, subId: string, co
   const { data: lims } = await admin.rpc("_billing_v2_limits", { _sub: subId });
   const limite = Number((lims as any[] ?? []).find((l) => l.recurso === "colaboradores")?.limite ?? 0);
   const exc = Math.max(0, c.contados - limite);
-  const { data: ad } = await admin.from("plan_addons").select("price_cents").eq("module", "pessoas").eq("code", "colaboradores").single();
-  const { data: pl } = await admin.from("plans").select("features").eq("id", sub.plan_id).maybeSingle();
-  const unit = precoExcedenteColaborador(pl?.features, ad?.price_cents);
+  const { unit, tabela, pct } = await precoExcedente(admin, sub, comp);
   const cortesia = await cortesiaIntegral(admin, sub);
   return { competencia: comp, status: sub.status, contados: c.contados, regulares: c.regulares, variaveis_contados: c.variaveis_contados,
     variaveis_fora: c.variaveis_fora, limite, excedente: exc, cortesia, ja_apurado: !!ja,
+    valor_unit_cents: unit, valor_unit_tabela_cents: tabela, desconto_negociado_pct: pct,
     forma: exc === 0 ? "nenhuma" : cortesia ? "cortesia" : sub.billing_cycle === "anual" ? "avulsa" : "proxima_fatura",
     valor_informativo_cents: exc * unit, valor_a_cobrar_cents: cortesia ? 0 : exc * unit };
 }
@@ -96,16 +112,15 @@ export async function apurarExcedentes(admin: SupabaseClient, subId: string, com
   const lim = (lims as any[] ?? []).find((l) => l.recurso === "colaboradores");
   const limite = Number(lim?.limite ?? 0);
   const exc = Math.max(0, c.contados - limite);
-  const { data: ad } = await admin.from("plan_addons").select("price_cents").eq("module", "pessoas").eq("code", "colaboradores").single();
-  const { data: pl } = await admin.from("plans").select("features").eq("id", sub.plan_id).maybeSingle();
-  const unit = precoExcedenteColaborador(pl?.features, ad?.price_cents);
+  const { unit, tabela, pct } = await precoExcedente(admin, sub, comp);
   const cortesia = await cortesiaIntegral(admin, sub);
   const valor = cortesia ? 0 : exc * unit;
   const anual = sub.billing_cycle === "anual";
   const detalhe = { mes: comp.slice(0, 7), contados: c.contados, regulares: c.regulares, variaveis_contados: c.variaveis_contados,
-    variaveis_fora: c.variaveis_fora, limite, excedente: exc, valor_unit_cents: unit };
+    variaveis_fora: c.variaveis_fora, limite, excedente: exc, valor_unit_cents: unit,
+    ...(pct > 0 ? { valor_unit_tabela_cents: tabela, desconto_negociado_pct: pct } : {}) };
   let forma: "proxima_fatura" | "avulsa" | "nenhuma" | "cortesia" = exc === 0 ? "nenhuma" : cortesia ? "cortesia" : anual ? "avulsa" : "proxima_fatura";
-  const desc = `Colaboradores excedentes ${comp.slice(5, 7)}/${comp.slice(0, 4)}: ${exc} × ${brl(unit)}`;
+  const desc = `Colaboradores excedentes ${comp.slice(5, 7)}/${comp.slice(0, 4)}: ${exc} × ${brl(unit)}${pct > 0 ? ` (desconto negociado de ${String(pct).replace(".", ",")}%)` : ""}`;
   let externo: string | null = null;
   if (valor > 0) {
     await registrarPendente(admin, sub, { origem: "excedente", referencia: comp, descricao: desc, valor_cents: valor, detalhe });
@@ -260,4 +275,36 @@ export async function conciliar(admin: SupabaseClient, opts: { env: "production"
   }
   if (divs.length) await admin.from("billing_v2_conciliacao_divergencias").insert(divs.map((d) => ({ ...d, execucao_id: execucao, asaas_env: opts.env })));
   return { execucao_id: execucao, assinaturas_verificadas: verificadas, cobrancas_verificadas: cobrancas, divergencias: divs };
+}
+
+// ---------------- Desconto negociado ----------------
+
+/**
+ * Fim da janela (ou revogação) do desconto negociado: volta a mensalidade recorrente ao
+ * valor de tabela no Asaas (só a pendente muda; paga ou vencida fica como está) e encerra.
+ * `simular` só lista o que faria.
+ */
+export async function encerrarDescontosVencidos(admin: SupabaseClient, contas: string[], simular: boolean, criados: Criados | null = null) {
+  if (!contas.length) return [];
+  const { data: ds } = await admin.from("billing_v2_descontos_negociados").select("*")
+    .in("billing_account_id", contas).not("subscription_id", "is", null).is("encerrado_em", null);
+  const hoje = hojeBrasilia();
+  const res: Record<string, unknown>[] = [];
+  for (const d of (ds ?? []) as any[]) {
+    if (!mensalidadeDeveVoltar(d, hoje)) continue;
+    try {
+      const { data: sub } = await admin.from("subscriptions").select("*").eq("id", d.subscription_id).single();
+      const viva = !["canceled", "expired"].includes(String(sub?.status));
+      if (simular) { res.push({ desconto_id: d.id, subscription_id: d.subscription_id, atualizaria_asaas: viva && !!sub?.external_subscription_id }); continue; }
+      let novo: number | null = null;
+      if (viva) novo = (await atualizarValorAsaas(admin, sub, criados)).cents;
+      await admin.from("billing_v2_descontos_negociados").update({ encerrado_em: new Date().toISOString() }).eq("id", d.id).is("encerrado_em", null);
+      await admin.from("subscription_events").insert({ subscription_id: d.subscription_id, tipo_evento: "desconto_negociado_encerrado",
+        payload: { desconto_id: d.id, revogado: !!d.revogado_em, novo_valor_cents: novo } });
+      res.push({ desconto_id: d.id, subscription_id: d.subscription_id, novo_valor_cents: novo });
+    } catch (e) {
+      res.push({ desconto_id: d.id, subscription_id: d.subscription_id, erro: String((e as Error).message ?? e) });
+    }
+  }
+  return res;
 }

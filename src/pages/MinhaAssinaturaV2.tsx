@@ -17,6 +17,7 @@ import { useEnterpriseElegibilidade } from "@/hooks/useEnterpriseElegibilidade";
 import { toast } from "sonner";
 import { notifyError } from "@/lib/notifyError";
 import { WhatsappFinanceiroCampo } from "@/components/billing/WhatsappFinanceiroCampo";
+import { resumoDescontoNegociado, type DescontoNegociadoInfo } from "@/lib/billing/descontoNegociado";
 
 type Json = Record<string, any>;
 const MODULO: Record<string, string> = { financeiro: "Financeiro 360°", pessoas: "Pessoas 360°" };
@@ -229,6 +230,17 @@ function Campo({ r, v }: { r: string; v?: string | null }) {
 
 function AssinaturaCard({ s, onAcao }: { s: Json; onAcao: (a: Acao) => void }) {
   const pend = s.pending_plan_change as Json | null;
+  const { selectedCompanyId } = useCompanyContext();
+  const descontos = useQuery({
+    queryKey: ["meus-descontos-negociados", selectedCompanyId],
+    enabled: !!selectedCompanyId,
+    queryFn: async () => {
+      const { data, error } = await supabase.rpc("billing_v2_meus_descontos_negociados", { _company_id: selectedCompanyId! });
+      if (error) throw error;
+      return (data ?? []) as unknown as DescontoNegociadoInfo[];
+    },
+  });
+  const descontosSub = (descontos.data ?? []).filter((d: any) => d.subscription_id === s.id);
   const uso = useQuery({
     queryKey: ["uso-assinatura-v2", s.id],
     queryFn: async () => {
@@ -311,6 +323,14 @@ function AssinaturaCard({ s, onAcao }: { s: Json; onAcao: (a: Acao) => void }) {
             <div key={a.id}>{a.nome} × {a.quantidade}{a.cortesia ? " (cortesia)" : ` · ${formatCents(a.preco_cents)}`}</div>
           )) : "Nenhum"}
         </Bloco>
+
+        {!!descontosSub.length && (
+          <Bloco t="Desconto Negociado">
+            {descontosSub.map((d) => (
+              <div key={d.id} data-testid="desconto-negociado">{resumoDescontoNegociado(d, s.module === "pessoas")}</div>
+            ))}
+          </Bloco>
+        )}
 
         {!!(s.concessoes ?? []).length && (
           <Bloco t="Concessões">

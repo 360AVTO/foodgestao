@@ -216,9 +216,16 @@ Deno.serve(async (req) => {
         const { count: unidades } = await admin.from("dp_unidades")
           .select("id", { count: "exact", head: true })
           .eq("company_id", row.company_id).eq("ativo", true);
+        // desconto negociado ainda não contratado entra na estimativa (o valor final é sempre o da contratação)
+        const { data: desc } = vinc?.billing_account_id
+          ? await admin.from("billing_v2_descontos_negociados").select("percentual,mensalidades")
+            .eq("billing_account_id", vinc.billing_account_id).eq("module", "pessoas")
+            .is("subscription_id", null).is("revogado_em", null).is("encerrado_em", null).limit(1).maybeSingle()
+          : { data: null };
         indicacaoCache.set(row.company_id, colabErr
           ? null
-          : indicarPlanoPessoas(catalogoPessoas, { colaboradores: Number(colab ?? 0), unidades: unidades ?? 0 }, SITE_URL));
+          : indicarPlanoPessoas(catalogoPessoas, { colaboradores: Number(colab ?? 0), unidades: unidades ?? 0 }, SITE_URL,
+            desc ? { percentual: Number((desc as any).percentual), mensalidades: Number((desc as any).mensalidades) } : null));
       }
       const ind = indicacaoCache.get(row.company_id);
       if (!ind) return {};

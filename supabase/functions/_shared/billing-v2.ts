@@ -3,6 +3,7 @@
 // vindo do registro (billing_accounts.asaas_env), nunca do navegador.
 import type { SupabaseClient } from "npm:@supabase/supabase-js@2";
 import { asaasFetch, parseAsaasEnv, requireAsaasId, type AsaasEnv } from "./asaas.ts";
+import { hojeBrasilia, janelaDesconto } from "./billing-desconto-negociado.ts";
 
 export type Ciclo = "mensal" | "anual";
 export type Forma = "pix" | "boleto" | "cartao";
@@ -240,10 +241,13 @@ export async function contratar(admin: SupabaseClient, conta: Conta, userEmail: 
   const falha = conta.is_test && conta.asaas_env === "sandbox" ? p.simular_falha : undefined;
   const { data: plano } = await admin.from("plans").select("id,module,slug,name").eq("slug", p.plano).eq("is_active", true).maybeSingle();
   if (!plano) throw new BillingError(422, "Plano indisponível.");
-  const { data: ativa } = await admin.from("subscriptions").select("id")
+  // Teste grátis ou carência (nunca cobrados no Asaas) são substituídos pela contratação;
+  // assinatura paga em vigor continua exigindo troca de plano.
+  const { data: vivas } = await admin.from("subscriptions").select("id,status,canceled_at,external_subscription_id")
     .eq("billing_account_id", conta.id).eq("module", plano.module)
-    .in("status", ["active", "trialing", "past_due", "pending", "grace"]).limit(1);
-  if (ativa?.length) throw new BillingError(409, "Já existe assinatura deste módulo para a conta. Use troca de plano.");
+    .in("status", ["active", "trialing", "past_due", "pending", "grace"]);
+  const substituiveis = (vivas ?? []).filter((s: any) => ["trialing", "grace"].includes(s.status) && !s.external_subscription_id);
+  if ((vivas ?? []).length > substituiveis.length) throw new BillingError(409, "Já existe assinatura deste módulo para a conta. Use troca de plano.");
   if (p.parcelas && p.parcelas > 1 && !(p.ciclo === "anual" && p.forma === "cartao")) {
     throw new BillingError(422, "Parcelamento só no plano anual pago com cartão.");
   }
@@ -272,6 +276,11 @@ export async function contratar(admin: SupabaseClient, conta: Conta, userEmail: 
   conta.email_cobranca = (atual as any).email_cobranca ?? conta.email_cobranca;
   const cliente = await garantirCliente(admin, conta, userEmail);
 
+  // Libera o teste/carência e a cobertura antiga das empresas (o banco aceita uma assinatura viva e
+  // uma cobertura por empresa e módulo). Qualquer falha adiante devolve tudo como estava.
+  const anteriores = await liberarAnteriores(admin, substituiveis, cobertas, plano.module);
+  const restaurar = () => restaurarAnteriores(admin, anteriores);
+
   const inicio = new Date();
   const fim = new Date(inicio); p.ciclo === "anual" ? fim.setFullYear(fim.getFullYear() + 1) : fim.setMonth(fim.getMonth() + 1);
   const { data: sub, error } = await admin.from("subscriptions").insert({
@@ -280,7 +289,11 @@ export async function contratar(admin: SupabaseClient, conta: Conta, userEmail: 
     current_period_start: inicio.toISOString(), current_period_end: fim.toISOString(), next_charge_date: hoje(1),
     external_customer_id: cliente,
   }).select("*").single();
-  if (error) throw new BillingError(500, "Falha ao registrar a assinatura.", error.message);
+  if (error) {
+    const falhaRest = await restaurar();
+    if (falhaRest) console.error("[contratar] restaurar teste/carência falhou", falhaRest);
+    throw new BillingError(500, "Falha ao registrar a assinatura.", error.message);
+  }
 
   // Tudo ou nada: qualquer falha daqui em diante desfaz o que foi gravado.
   let asId: string | null = null;
@@ -295,6 +308,15 @@ export async function contratar(admin: SupabaseClient, conta: Conta, userEmail: 
       if (!ad) throw new Error(`adicional ${a.code} inexistente`);
       const { error: eA } = await admin.from("subscription_addons").insert({ subscription_id: sub.id, addon_id: ad.id, quantity: a.qtd, price_cents: ad.price_cents, status: "active", origem: "compra" });
       if (eA) throw new Error(`adicional: ${eA.message}`);
+    }
+    // Desconto negociado: amarra à assinatura antes de criar no Asaas (o valor já veio com ele na cotação).
+    for (const dc of ((q as any).descontos_comerciais ?? []) as any[]) {
+      if (!dc?.aplica || dc.aplicado || dc.modulo !== plano.module) continue;
+      const jan = janelaDesconto(hojeBrasilia(inicio), hoje(1), Number(dc.mensalidades));
+      const { data: dAp, error: eD } = await admin.from("billing_v2_descontos_negociados").update({
+        subscription_id: sub.id, aplicado_em: inicio.toISOString(), primeiro_vencimento: hoje(1), ...jan,
+      }).eq("id", dc.id).is("subscription_id", null).is("revogado_em", null).select("id");
+      if (eD || !dAp?.length) throw new Error(`desconto negociado: ${eD?.message ?? "alterado durante a contratação"}`);
     }
 
     if (falha === "criacao") throw new Error("falha simulada antes de criar no Asaas (teste Sandbox)");
@@ -363,6 +385,8 @@ export async function contratar(admin: SupabaseClient, conta: Conta, userEmail: 
       gravarComRetry("coberturas encerradas", () => admin.from("subscription_companies").update({ removed_at: agora }).eq("subscription_id", sub.id).is("removed_at", null), simG),
       gravarComRetry("adicionais cancelados", () => admin.from("subscription_addons").update({ status: "canceled" }).eq("subscription_id", sub.id), false),
       gravarComRetry("faturas canceladas", () => admin.from("invoices").update({ status: "canceled" }).eq("subscription_id", sub.id).in("status", ["draft", "open", "overdue"]), false),
+      gravarComRetry("desconto negociado liberado", () => admin.from("billing_v2_descontos_negociados").update({ subscription_id: null, aplicado_em: null,
+        primeiro_vencimento: null, ultimo_vencimento_com_desconto: null, competencia_inicial: null, competencia_final: null }).eq("subscription_id", sub.id), false),
       gravarComRetry("evento contratacao_desfeita", () => admin.from("subscription_events").insert({ subscription_id: sub.id, tipo_evento: "contratacao_desfeita", actor_id: actorId ?? null,
         payload: { erro: detalhe.slice(0, 800), cliente, criados_asaas: tentativa, desfeitos_asaas: desfeitos, pendentes_asaas: pendentes, resposta_incerta: incerto, busca_falhou: buscaFalhou } }), false),
       gravarComRetry(ok ? "evento contratacao_falhou" : "evento contratacao_falhou_compensacao_pendente", () => admin.from("billing_account_events").insert({ billing_account_id: conta.id, actor_id: actorId ?? conta.titular_user_id,
@@ -370,6 +394,9 @@ export async function contratar(admin: SupabaseClient, conta: Conta, userEmail: 
         payload: { plano: p.plano, forma: p.forma, ciclo: p.ciclo, subscription_id: sub.id, cliente, asaas_env: conta.asaas_env,
           desfeitos: desfeitos.map((d) => d.id), pendentes, resposta_incerta: incerto, erro: detalhe.slice(0, 800) } }), false),
     ])).filter((x): x is string => !!x);
+    // teste/carência anteriores voltam depois que a cobertura nova foi encerrada
+    const falhaRest = await restaurar();
+    if (falhaRest) falhas.push(falhaRest);
     if (falhas.length) {
       const eInc = await gravarComRetry("evento desfazimento_incompleto", () => admin.from("billing_account_events").insert({ billing_account_id: conta.id, actor_id: conta.titular_user_id,
         tipo_evento: "desfazimento_incompleto", payload: { subscription_id: sub.id, asaas_env: conta.asaas_env, falhas, erro: detalhe.slice(0, 400) } }), false);
@@ -380,10 +407,63 @@ export async function contratar(admin: SupabaseClient, conta: Conta, userEmail: 
     console.error("[contratar] falha", ok ? "desfeita" : "COMPENSAÇÃO PENDENTE", sub.id, detalhe, JSON.stringify(pendentes), falhas.length ? `LOCAL INCOMPLETO ${JSON.stringify(falhas)}` : "");
     throw new BillingError(502, ok ? MSG_FALHA_DESFEITA : MSG_FALHA_COMPENSACAO, { subscription_id: sub.id, compensacao_pendente: !ok, desfazimento_incompleto: falhas.length > 0 });
   }
-  await admin.from("subscription_events").insert({ subscription_id: sub.id, tipo_evento: "contratacao_v2", actor_id: actorId ?? null, payload: { quote: q, forma: p.forma, parcelas: p.parcelas ?? 1, parcelamento: parc, empresas: cobertas } });
+  await admin.from("subscription_events").insert({ subscription_id: sub.id, tipo_evento: "contratacao_v2", actor_id: actorId ?? null, payload: { quote: q, forma: p.forma, parcelas: p.parcelas ?? 1, parcelamento: parc, empresas: cobertas, substituiu: anteriores.subs.map((a) => a.id) } });
+  if (anteriores.subs.length) {
+    await admin.from("subscription_events").insert(anteriores.subs.map((a) => ({ subscription_id: a.id, tipo_evento: "substituida_pela_contratacao",
+      actor_id: actorId ?? null, payload: { status_anterior: a.status, nova_assinatura: sub.id } })));
+  }
   await eventoConta(admin, { ...sub, billing_account_id: conta.id }, "contratacao_concluida", actorId ?? conta.titular_user_id,
     { subscription_id: sub.id, plano: p.plano, ciclo: p.ciclo, forma: p.forma, total_cents: q.total_ciclo_cents, empresas: cobertas });
   return { subscription_id: sub.id, total_cents: q.total_ciclo_cents, empresas_cobertas: cobertas.length, parcelamento: parc };
+}
+
+type Anteriores = { subs: { id: string; status: string; canceled_at: string | null }[]; coberturas: string[] };
+
+/**
+ * Encerra o teste/carência substituído e as coberturas antigas (de assinaturas que não
+ * estão mais em vigor) das empresas que a contratação vai cobrir.
+ */
+async function liberarAnteriores(admin: SupabaseClient, subs: any[], empresas: string[], modulo: string): Promise<Anteriores> {
+  const ids = subs.map((s) => s.id as string);
+  const { data: cobs, error: eCob } = await admin.from("subscription_companies").select("id,subscription_id,module")
+    .in("company_id", empresas).is("removed_at", null);
+  if (eCob) throw new BillingError(500, "Não foi possível conferir as empresas cobertas. Nada foi cobrado. Tente novamente.", eCob.message);
+  const doModulo = (cobs ?? []).filter((c: any) => c.module === modulo);
+  const outras = [...new Set(doModulo.map((c: any) => c.subscription_id as string).filter((id) => !ids.includes(id)))];
+  if (outras.length) {
+    const { data: st } = await admin.from("subscriptions").select("id,status").in("id", outras);
+    if ((st ?? []).length !== outras.length || (st ?? []).some((s: any) => !["canceled", "expired"].includes(s.status))) {
+      throw new BillingError(409, "Uma das empresas já está coberta por outra assinatura deste módulo. Nada foi cobrado. Fale com o suporte.");
+    }
+  }
+  const res: Anteriores = { subs: [], coberturas: [] };
+  const agora = new Date().toISOString();
+  for (const s of subs) {
+    const { error } = await admin.from("subscriptions").update({ status: "canceled", canceled_at: agora }).eq("id", s.id).eq("status", s.status);
+    if (error) { await restaurarAnteriores(admin, res); throw new BillingError(500, "Não foi possível encerrar o teste para contratar. Nada foi cobrado. Tente novamente.", error.message); }
+    res.subs.push({ id: s.id, status: s.status, canceled_at: s.canceled_at ?? null });
+  }
+  const cobIds = doModulo.map((c: any) => c.id as string);
+  if (cobIds.length) {
+    const { error } = await admin.from("subscription_companies").update({ removed_at: agora }).in("id", cobIds);
+    if (error) { await restaurarAnteriores(admin, res); throw new BillingError(500, "Não foi possível preparar as empresas para a contratação. Nada foi cobrado. Tente novamente.", error.message); }
+    res.coberturas = cobIds;
+  }
+  return res;
+}
+
+/** Devolve teste/carência e coberturas ao estado anterior; retorna o erro final ou null. */
+async function restaurarAnteriores(admin: SupabaseClient, a: Anteriores): Promise<string | null> {
+  const erros: string[] = [];
+  if (a.coberturas.length) {
+    const e = await gravarComRetry("coberturas anteriores restauradas", () => admin.from("subscription_companies").update({ removed_at: null }).in("id", a.coberturas), false);
+    if (e) erros.push(e);
+  }
+  for (const s of a.subs) {
+    const e = await gravarComRetry(`assinatura ${s.id} restaurada`, () => admin.from("subscriptions").update({ status: s.status, canceled_at: s.canceled_at }).eq("id", s.id), false);
+    if (e) erros.push(e);
+  }
+  return erros.length ? erros.join("; ") : null;
 }
 
 /** Grava em billing_account_events com o autor. `estrito` = falha interrompe a operação. */
@@ -426,7 +506,7 @@ async function escalarAlertaCritico(admin: SupabaseClient, sub: any, tipo: strin
 }
 
 
-async function atualizarValorAsaas(admin: SupabaseClient, sub: any, criados: Criados | null, extra: Record<string, unknown> = {}) {
+export async function atualizarValorAsaas(admin: SupabaseClient, sub: any, criados: Criados | null, extra: Record<string, unknown> = {}) {
   const v = await valorRecorrente(admin, sub.id);
   await admin.from("subscriptions").update({ monthly_price_cents: v.cents }).eq("id", sub.id);
   if (!sub.external_subscription_id) return v;

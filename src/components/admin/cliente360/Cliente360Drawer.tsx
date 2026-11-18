@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogD
 import { toast } from "sonner";
 import { notifyError } from "@/lib/notifyError";
 import { useCliente360Detalhe } from "@/hooks/useCliente360";
+import { DescontoNegociadoBloco } from "./DescontoNegociadoBloco";
 import { useExemptSubscription, useRemoveExemption, useStartGrace } from "@/hooks/useBilling";
 import {
   C360Assinatura, C360Conta, MODULOS, STATUS_LABEL, assinaturaDoModulo, brl, dataBR, emCortesia, fimDoDiaBR,
@@ -167,6 +168,7 @@ export function Cliente360Drawer({ conta, onClose }: { conta: C360Conta | null; 
               </TabsContent>
 
               <TabsContent value="concessoes" className="space-y-2 text-sm">
+                <DescontoNegociadoBloco contaId={conta.id} />
                 {(det.data?.concessoes ?? []).length === 0 && <p className="text-muted-foreground">Nenhuma concessão registrada.</p>}
                 {(det.data?.concessoes ?? []).map((g: any) => (
                   <div key={g.id} className="rounded border p-2">

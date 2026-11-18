@@ -1758,6 +1758,13 @@
       "when": 1795013407030,
       "tag": "0250_empresa_proprietario_financeiro",
       "breakpoints": true
+    },
+    {
+      "idx": 251,
+      "version": "7",
+      "when": 1795016656041,
+      "tag": "0251_desconto_negociado_cobranca",
+      "breakpoints": true
     }
   ]
 }

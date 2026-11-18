@@ -1,5 +1,5 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
-import { indicarPlanoPessoas, type PlanoComPreco } from "./billing-plano-indicado.ts";
+import { detalheDoPlano, indicarPlanoPessoas, type PlanoComPreco } from "./billing-plano-indicado.ts";
 import { mensagemWhatsapp } from "./billing-whatsapp.ts";
 import { billingCopy } from "./transactional-email-templates/billing-copy.ts";
 
@@ -110,4 +110,11 @@ Deno.test("nenhum WhatsApp da régua manda o cliente para outro número", () => 
     "grace_d_menos_3", "grace_d_menos_1", "grace_d0", "d_mais_1", "d_mais_5", "d_mais_10", "d_mais_20", "d_mais_28"]) {
     assert(!mensagemWhatsapp(s, { ...RANCHO, diasRestantes: 3 })!.includes("wa.me"), s);
   }
+});
+
+Deno.test("indicação do Enterprise mostra o desconto negociado de 10% nas 3 primeiras mensalidades", () => {
+  const ent = { slug: "pessoas-enterprise", name: "Pessoas 360° Enterprise", module: "pessoas", sort_order: 4, is_enterprise: false,
+    features: { price_per_collaborator_cents: 1000, min_collaborators: 19 }, price_monthly_cents: 19000 };
+  assertEquals(detalheDoPlano(ent as any, 47, { percentual: 10, mensalidades: 3 }),
+    "R$ 10,00 por colaborador ativo, hoje cerca de R$ 470,00/mês; com o desconto negociado de 10%, R$ 9,00 por colaborador (cerca de R$ 423,00/mês) nas 3 primeiras mensalidades");
 });
