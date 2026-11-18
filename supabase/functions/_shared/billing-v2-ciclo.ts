@@ -239,7 +239,7 @@ export async function solicitarNfse(admin: SupabaseClient, invoice: any, env: "p
       const clienteId = (conta as any)?.asaas_customer_id as string | undefined;
       if (contaId && clienteId) {
         const ok = await sincronizarEnderecoCliente(admin, contaId, clienteId, (conta as any)?.documento_pagador, env);
-        if (!ok) throw new Error("Endereço da empresa pagadora incompleto (CEP, logradouro e bairro). Complete em Empresas > Editar Empresa.");
+        if (!ok) throw new Error("Endereço do pagador não encontrado (cadastro da empresa, unidade com o mesmo CNPJ e Receita Federal). Complete CEP, rua e bairro em Empresas > Editar Empresa.");
       }
       resposta = await asaasFetch("/invoices", { method: "POST", body: JSON.stringify({
         payment: invoice.external_invoice_id, ...cfg, observations: `Fatura Aveto 360 ${invoice.id.slice(0, 8)}`,

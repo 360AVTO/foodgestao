@@ -1,5 +1,5 @@
 import { assertEquals } from "jsr:@std/assert@1";
-import { enderecoAsaas, escolherEndereco } from "./billing-endereco.ts";
+import { enderecoAsaas, enderecoDaReceita, escolherEndereco } from "./billing-endereco.ts";
 
 const aveto = { cnpj: "12.345.678/0001-90", cep: "74367-633", logradouro: "Avenida Ravena", numero: "201", complemento: "Ap. 1204", bairro: "Residencial Eldorado", cidade: "GOIÂNIA", uf: "GO" };
 
@@ -19,4 +19,11 @@ Deno.test("prefere a empresa com o CNPJ do pagador; senão a primeira completa",
   assertEquals(escolherEndereco([outra, aveto], "12345678000190")?.postalCode, "74367633");
   assertEquals(escolherEndereco([{ cnpj: "12345678000190" }, outra], "12345678000190")?.postalCode, "01001000");
   assertEquals(escolherEndereco([{ cnpj: "1" }], "1"), null);
+});
+
+Deno.test("endereço oficial da Receita completa o cliente quando o cadastro está vazio", () => {
+  const receita = { cep: "74932-260", logradouro: "9 A", numero: "S/N", complemento: "QUADRA10 LOTE 03", bairro: "SETOR GARAVELO", municipio: "APARECIDA DE GOIANIA", uf: "GO" };
+  assertEquals(enderecoAsaas(enderecoDaReceita(receita, "06002178000158")), { postalCode: "74932260", address: "9 A", addressNumber: "S/N", province: "SETOR GARAVELO", complement: "QUADRA10 LOTE 03" });
+  assertEquals(enderecoDaReceita(null, "06002178000158"), null);
+  assertEquals(enderecoAsaas(enderecoDaReceita({ logradouro: "9 A" }, "06002178000158")), null);
 });
