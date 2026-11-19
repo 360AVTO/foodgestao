@@ -3,7 +3,9 @@
  *
  * O token chega só no link; no banco fica apenas o hash. A pessoa confirma o
  * próprio CPF antes de assinar — sem CPF correto, nada é gravado. Assinatura é
- * idempotente: recibo já assinado devolve o registro existente.
+ * idempotente: recibo já assinado devolve o registro existente. Depois de
+ * assinado, o mesmo link continua abrindo a via quitada para download
+ * (só o cancelamento encerra o link).
  *
  * Ações: ver | pdf | assinar
  */
@@ -118,10 +120,15 @@ Deno.serve(async (req) => {
       p_hash: hashArquivo,
       p_ip: clientIp(req),
       p_user_agent: (req.headers.get("user-agent") ?? "").slice(0, 400),
+      // Imagem gravada na mesma operação da assinatura (nunca em separado).
+      p_assinatura_imagem: assinaturaImg,
     });
-    if (error) throw error;
-    await admin.from("dp_recibos").update({ assinatura_imagem: assinaturaImg })
-      .eq("id", row.id).is("assinatura_imagem", null);
+    if (error) {
+      if (String(error.message ?? "").includes("RECIBO_ASSINATURA_AUSENTE")) {
+        return json(400, { error: "Desenhe ou escolha a sua assinatura antes de confirmar." });
+      }
+      throw error;
+    }
     return json(200, { assinado_em: assinadoEm });
   } catch (e) {
     await recordEdgeError({ functionName: FUNCAO, action: "assinar recibo pelo link", error: e });

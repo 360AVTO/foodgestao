@@ -20786,6 +20786,17 @@ export type Database = {
         Args: { _documento_id: string; _ip?: string; _user_agent?: string }
         Returns: string
       }
+      dp_documento_aceitar_servidor: {
+        Args: {
+          _assinatura_imagem: string
+          _documento_id: string
+          _ip?: string
+          _termo_versao: string
+          _user_agent?: string
+          _user_id: string
+        }
+        Returns: string
+      }
       dp_documento_anexar_via_assinada: {
         Args: {
           _documento_id: string
@@ -22312,6 +22323,7 @@ export type Database = {
       dp_push_worker_secret: { Args: never; Returns: string }
       dp_recibo_assinar_externo: {
         Args: {
+          p_assinatura_imagem: string
           p_hash: string
           p_ip: string
           p_recibo_id: string

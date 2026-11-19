@@ -7,8 +7,9 @@
  *     (ativo, aviso após o último dia ou desligado dentro do prazo de acesso);
  *  3. confere que o documento é daquele colaborador e daquela empresa;
  *  4. lê os bytes do arquivo no armazenamento privado e calcula o SHA-256;
- *  5. chama a operação de banco que valida tudo novamente e grava o aceite
- *     de forma atômica e idempotente.
+ *  5. chama a operação de banco (só servidor) que valida tudo novamente,
+ *     exige o Termo do Portal vigente e grava aceite + imagem da assinatura
+ *     numa única transação, de forma idempotente.
  *
  * Fail closed: qualquer divergência recusa com frase de negócio.
  */
@@ -19,6 +20,7 @@ import { garantirHashDocumento } from "../_shared/doc-hash.ts";
 import { recordEdgeError } from "../_shared/error-log.ts";
 import { assinaturaValida } from "../_shared/assinatura-pdf.ts";
 import { TIPOS_DESLIGAMENTO_SEM_DIGITAL } from "../_shared/doc-tipos.ts";
+import { TERMO_PORTAL_VERSAO } from "../_shared/termo-portal.ts";
 
 const BUCKET = "dp-documentos";
 const FUNCAO = "dp-documento-aceitar";
@@ -35,6 +37,8 @@ const FRASES: Record<string, { status: number; frase: string }> = {
   documento_nao_exige_aceite: { status: 409, frase: "Este documento não precisa de assinatura." },
   documento_sem_arquivo: { status: 409, frase: "O arquivo deste documento ainda não está disponível." },
   conteudo_nao_conferido: { status: 409, frase: "Não foi possível conferir o conteúdo do documento agora. Tente novamente em instantes." },
+  termo_portal_pendente: { status: 409, frase: "Antes de assinar, leia e aceite o Termo de Acesso ao Portal. Feche e abra o portal novamente." },
+  assinatura_ausente: { status: 400, frase: "Desenhe ou escolha a sua assinatura antes de confirmar." },
 };
 
 function erro(status: number, mensagem: string): Response {
@@ -112,29 +116,27 @@ Deno.serve(async (req) => {
     }
 
     const ip = (req.headers.get("x-forwarded-for") ?? "").split(",")[0].trim() || null;
-    const { data: aceiteId, error } = await cliente.rpc("dp_documento_aceitar", {
+    // Aceite e imagem da assinatura gravados juntos: sem imagem, nada é gravado.
+    const { data: aceiteId, error } = await admin.rpc("dp_documento_aceitar_servidor", {
+      _user_id: caller.id,
       _documento_id: documentoId,
+      _assinatura_imagem: assinaturaImg,
+      _termo_versao: TERMO_PORTAL_VERSAO,
       _user_agent: (req.headers.get("user-agent") ?? "").slice(0, 500) || null,
       _ip: ip,
     });
 
-    if (error) {
-      const chave = Object.keys(FRASES).find((k) => String(error.message ?? "").includes(k));
+    if (error || !aceiteId) {
+      const chave = Object.keys(FRASES).find((k) => String(error?.message ?? "").includes(k));
       if (chave) return erro(FRASES[chave].status, FRASES[chave].frase);
       await recordEdgeError({
         functionName: FUNCAO,
         action: "registrar assinatura do documento",
-        error,
+        error: error ?? new Error("aceite_sem_id"),
         companyId: doc.company_id,
         details: { documento_id: documentoId },
       });
       return erro(500, "Não foi possível registrar a assinatura agora.");
-    }
-
-    // Imagem da assinatura: gravada uma única vez (aceite idempotente mantém a primeira).
-    if (aceiteId) {
-      await admin.from("dp_documento_aceites").update({ assinatura_imagem: assinaturaImg })
-        .eq("id", aceiteId).is("assinatura_imagem", null);
     }
 
     return new Response(JSON.stringify({ aceite_id: aceiteId, conteudo_hash: hash }), {

@@ -1772,6 +1772,20 @@
       "when": 1795026158435,
       "tag": "0252_regua_whatsapp_vencimento_util",
       "breakpoints": true
+    },
+    {
+      "idx": 253,
+      "version": "7",
+      "when": 1795105588215,
+      "tag": "0253_assinatura_servidor_atomica",
+      "breakpoints": true
+    },
+    {
+      "idx": 254,
+      "version": "7",
+      "when": 1795105659292,
+      "tag": "0254_fechar_aceite_direto",
+      "breakpoints": true
     }
   ]
 }

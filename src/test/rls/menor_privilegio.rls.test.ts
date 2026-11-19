@@ -76,6 +76,7 @@ describe("Menor privilégio: visitante não grava", () => {
 describe("Menor privilégio: visitante não executa rotinas", () => {
   const rotinas: Array<[string, Record<string, unknown>]> = [
     ["dp_documento_aceitar", { _documento_id: ID }],
+    ["dp_documento_aceitar_servidor", { _user_id: ID, _documento_id: ID, _assinatura_imagem: "x", _termo_versao: "v2" }],
     ["dp_documento_registrar", { p_dados: { titulo: "BURLA" } }],
     ["dp_colaborador_salvar", { p_dados: { nome: "BURLA" }, p_id: null, p_company_id: ID }],
     ["dp_escala_gerar_mes", { p_competencia: "2099-01-01", p_unidade_id: ID, p_itens: [] }],
