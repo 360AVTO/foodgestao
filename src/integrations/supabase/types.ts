@@ -3235,6 +3235,7 @@ export type Database = {
       concierge_provisionamentos: {
         Row: {
           ativado_em: string | null
+          ativado_papel: string | null
           ativado_user_id: string | null
           company_id: string
           conta_existente: boolean
@@ -3251,10 +3252,14 @@ export type Database = {
           modo: string
           modulos: string[]
           parametrizacao_concluida_em: string | null
+          proprietario_assumiu_em: string | null
+          proprietario_invite_grupo_id: string | null
+          proprietario_user_id: string | null
           whatsapp_enviado_em: string | null
         }
         Insert: {
           ativado_em?: string | null
+          ativado_papel?: string | null
           ativado_user_id?: string | null
           company_id: string
           conta_existente?: boolean
@@ -3271,10 +3276,14 @@ export type Database = {
           modo?: string
           modulos: string[]
           parametrizacao_concluida_em?: string | null
+          proprietario_assumiu_em?: string | null
+          proprietario_invite_grupo_id?: string | null
+          proprietario_user_id?: string | null
           whatsapp_enviado_em?: string | null
         }
         Update: {
           ativado_em?: string | null
+          ativado_papel?: string | null
           ativado_user_id?: string | null
           company_id?: string
           conta_existente?: boolean
@@ -3291,6 +3300,9 @@ export type Database = {
           modo?: string
           modulos?: string[]
           parametrizacao_concluida_em?: string | null
+          proprietario_assumiu_em?: string | null
+          proprietario_invite_grupo_id?: string | null
+          proprietario_user_id?: string | null
           whatsapp_enviado_em?: string | null
         }
         Relationships: [
@@ -19583,8 +19595,15 @@ export type Database = {
       }
       company_invite_renovar: { Args: { _invite_id: string }; Returns: Json }
       concierge_ativar: {
-        Args: { p_grupo_id: string; p_user_id: string }
-        Returns: undefined
+        Args: {
+          p_convidar_proprietario?: boolean
+          p_grupo_id: string
+          p_papel?: string
+          p_proprietario_nome?: string
+          p_proprietario_whatsapp?: string
+          p_user_id: string
+        }
+        Returns: Json
       }
       concierge_prazo: {
         Args: { p_agora: string; p_fim: string; p_modo: string }
@@ -21340,6 +21359,10 @@ export type Database = {
         Args: { p_importacao_id: string; p_user_id: string }
         Returns: Json
       }
+      dp_ficha_lote_notificar_convite: {
+        Args: { p_importacao_id: string; p_invite_id: string }
+        Returns: Json
+      }
       dp_ficha_lote_organizar: {
         Args: {
           p_grupos: Json
@@ -21361,7 +21384,9 @@ export type Database = {
         Args: { p_importacao_id: string }
         Returns: {
           email: string
+          invite_id: string
           nome: string
+          pendente: boolean
           perfil: string
           user_id: string
           whatsapp: string

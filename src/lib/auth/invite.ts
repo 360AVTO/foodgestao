@@ -6,6 +6,8 @@ export interface ConsumedInvite {
   accepted: boolean;
   companyName?: string | null;
   error?: string;
+  /** Empresa preparada pela Aveto: a pessoa precisa responder na tela do convite. */
+  redirect?: string;
 }
 
 /**
@@ -23,7 +25,9 @@ export async function consumePendingInviteToken(): Promise<ConsumedInvite> {
 
   try {
     const { data, error } = await supabase.functions.invoke("accept-invite", { body: { token } });
-    const errMsg = (data as any)?.error || error?.message;
+    const d = await lerCorpo(data, error);
+    if (d?.code === "definir_titular") return { accepted: false, redirect: `/convite/${d.token ?? token}` };
+    const errMsg = d?.error || error?.message;
     if (errMsg) return { accepted: false, error: errMsg };
     try {
       sessionStorage.removeItem(INVITE_TOKEN_KEY);
@@ -32,4 +36,14 @@ export async function consumePendingInviteToken(): Promise<ConsumedInvite> {
   } catch (e) {
     return { accepted: false, error: e instanceof Error ? e.message : String(e) };
   }
+}
+
+/** Corpo JSON da resposta, inclusive quando a função devolve status de erro. */
+export async function lerCorpo(data: unknown, error: unknown): Promise<any> {
+  if (data) return data;
+  const ctx = (error as { context?: { json?: () => Promise<unknown> } } | null)?.context;
+  if (ctx?.json) {
+    try { return await ctx.json(); } catch { return null; }
+  }
+  return null;
 }

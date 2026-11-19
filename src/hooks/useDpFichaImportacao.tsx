@@ -643,9 +643,23 @@ export function useAjustarLoteFicha() {
   });
 }
 
-export interface ResponsavelLote { user_id: string; nome: string; email: string; perfil: string; whatsapp: string | null }
+export interface ResponsavelLote {
+  /** Vazio para o gestor de empresa preparada pela Aveto que ainda não criou a senha. */
+  user_id: string | null;
+  nome: string;
+  email: string | null;
+  perfil: string;
+  whatsapp: string | null;
+  invite_id: string | null;
+  pendente: boolean;
+}
 
-/** Donos/administradores da empresa que podem receber o lote (somente equipe Aveto). */
+/** Identificador da escolha na lista: conta ativa ou convite de primeiro acesso. */
+export function chaveResponsavel(r: Pick<ResponsavelLote, "user_id" | "invite_id" | "pendente">): string {
+  return r.pendente ? `convite:${r.invite_id}` : String(r.user_id);
+}
+
+/** Donos/administradores da empresa (e o gestor que ainda vai criar a senha) que podem receber o lote (somente equipe Aveto). */
 export function useResponsaveisLote(importacaoId: string | null, habilitado: boolean) {
   return useQuery({
     queryKey: ["dp_ficha_lote_responsaveis", importacaoId],
@@ -666,15 +680,21 @@ export interface ResultadoRepasseLote {
   link: string;
   /** Número (com 55) para abrir a conversa manualmente quando o envio automático falhou. */
   telefone_contingencia: string | null;
+  /** Enviado junto com o link de primeiro acesso (gestor ainda sem senha). */
+  convite?: boolean;
 }
 
 /** Passa o lote ao responsável da empresa, em nome da Aveto 360: aviso no sistema, WhatsApp e e-mail. */
 export function useNotificarLoteFicha() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: async ({ importacaoId, userId, whatsapp }: { importacaoId: string; userId: string; whatsapp?: string | null }) => {
+    mutationFn: async ({ importacaoId, userId, conviteId, whatsapp }: {
+      importacaoId: string; userId?: string | null; conviteId?: string | null; whatsapp?: string | null;
+    }) => {
       const { data, error } = await supabase.functions.invoke("dp-ficha-lote-notificar", {
-        body: { importacaoId, userId, whatsapp: whatsapp || null },
+        body: conviteId
+          ? { importacaoId, conviteId, whatsapp: whatsapp || null }
+          : { importacaoId, userId, whatsapp: whatsapp || null },
       });
       if (error) {
         let msg = "Não foi possível enviar a notificação. Tente novamente.";
@@ -689,7 +709,10 @@ export function useNotificarLoteFicha() {
       if ((data as { error?: string })?.error) throw new Error((data as { error: string }).error);
       return data as ResultadoRepasseLote;
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["dp_ficha_importacoes"] });
+      qc.invalidateQueries({ queryKey: ["dp_ficha_lote_responsaveis"] });
+    },
   });
 }
 

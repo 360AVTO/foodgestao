@@ -123,7 +123,7 @@ Deno.serve(async (req) => {
       try {
         const r = await sendTemplateEmail("company-invite", p.gestor_email, {
           idempotencyKey: `concierge-${p.invite_id}`,
-          templateData: { companyName: empresa, inviterName: "A equipe AVETO 360", role: "owner", inviteUrl: link },
+          templateData: { companyName: empresa, inviterName: "A equipe AVETO 360", role: "admin", inviteUrl: link },
         });
         email = !!r.sent;
       } catch (e) {

@@ -19,3 +19,25 @@ export function mensagemLoteFicha(o: { nome?: string | null; empresa: string; fi
     `Agora é só conferir os dados da sua equipe e concluir os cadastros:\n👉 ${o.link}\n\n` +
     `Qualquer dúvida, estamos por aqui!`;
 }
+
+/** Link de primeiro acesso que, depois de criar a senha, abre direto o lote. */
+export function linkConviteLote(token: string, importacaoId: string): string {
+  return `${APP_URL}/convite/${token}?lote=${importacaoId}`;
+}
+
+/** Lote passado a quem ainda não criou a senha: fichas + primeiro acesso numa mensagem só. */
+export function mensagemConviteLoteFicha(o: {
+  nome?: string | null; empresa: string; fichas: number; link: string; contaExistente: boolean;
+}): string {
+  const n = primeiro(o.nome);
+  const fichas = o.fichas === 1 ? "a ficha de registro" : `as ${o.fichas} fichas de registro`;
+  const inicio = `Olá${n ? `, ${n}` : ""}! Aqui é da equipe da *AVETO 360*.\n\n` +
+    `Preparamos o ambiente da *${o.empresa}* e já organizamos ${fichas} da sua equipe: unidade, cargos e setores estão configurados.\n\n`;
+  if (o.contaExistente) {
+    return `${inicio}Entre com a sua senha de sempre para aceitar o acesso e conferir os cadastros:\n👉 ${o.link}\n\n` +
+      `No primeiro acesso você informa se é o proprietário ou o administrador da empresa. Qualquer dúvida, estamos por aqui!`;
+  }
+  return `${inicio}Crie sua senha e confira os cadastros (leva menos de 1 minuto):\n👉 ${o.link}\n\n` +
+    `No primeiro acesso você informa se é o proprietário ou o administrador da empresa. ` +
+    `Seus 7 dias de teste grátis começam quando você criar a senha. Qualquer dúvida, estamos por aqui!`;
+}

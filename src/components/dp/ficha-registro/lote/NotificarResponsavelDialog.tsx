@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { ResponsiveDialog } from "@/components/ui/responsive-dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  useNotificarLoteFicha, useResponsaveisLote, type ResultadoRepasseLote,
+  chaveResponsavel, useNotificarLoteFicha, useResponsaveisLote, type ResultadoRepasseLote,
 } from "@/hooks/useDpFichaImportacao";
 import { isValidPhone, maskPhone } from "@/lib/phone";
 
@@ -29,20 +29,21 @@ function telefoneLocal(raw: string | null | undefined): string {
 /** Exclusivo da equipe Aveto: passa o lote ao responsável da empresa, em nome da Aveto 360. */
 export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, empresaNome, pendentes }: Props) {
   const { data: responsaveis = [], isLoading, error } = useResponsaveisLote(importacaoId, open);
-  const [userId, setUserId] = useState<string | null>(null);
+  const [chave, setChave] = useState<string | null>(null);
   const [whatsapp, setWhatsapp] = useState("");
   const [resultado, setResultado] = useState<ResultadoRepasseLote | null>(null);
   const notificar = useNotificarLoteFicha();
 
   useEffect(() => {
-    if (!userId && responsaveis[0]) setUserId(responsaveis[0].user_id);
-  }, [responsaveis, userId]);
+    if (!chave && responsaveis[0]) setChave(chaveResponsavel(responsaveis[0]));
+  }, [responsaveis, chave]);
 
-  const escolhido = responsaveis.find((r) => r.user_id === userId) ?? null;
+  const escolhido = responsaveis.find((r) => chaveResponsavel(r) === chave) ?? null;
+  const pendente = !!escolhido?.pendente;
 
   useEffect(() => {
     setWhatsapp(telefoneLocal(escolhido?.whatsapp));
-  }, [escolhido?.user_id, escolhido?.whatsapp]);
+  }, [chave, escolhido?.whatsapp]);
 
   useEffect(() => {
     if (!open) setResultado(null);
@@ -52,9 +53,14 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
   const primeiro = (escolhido?.nome ?? "").split(/\s+/)[0] || "o responsável";
 
   const enviar = () => {
-    if (!userId) return;
+    if (!escolhido) return;
     notificar.mutate(
-      { importacaoId, userId, whatsapp: whatsappOk ? whatsapp.replace(/\D/g, "") : null },
+      {
+        importacaoId,
+        userId: pendente ? null : escolhido.user_id,
+        conviteId: pendente ? escolhido.invite_id : null,
+        whatsapp: whatsappOk ? whatsapp.replace(/\D/g, "") : null,
+      },
       {
         onSuccess: (r) => {
           setResultado(r);
@@ -77,7 +83,9 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
         open={open}
         onOpenChange={onOpenChange}
         title="Lote repassado"
-        description={`${primeiro} continua a conferência nesta mesma tela.`}
+        description={resultado.convite
+          ? `${primeiro} recebeu o link para criar a senha. Ao entrar, cai direto nas fichas e informa se é o proprietário ou o administrador.`
+          : `${primeiro} continua a conferência nesta mesma tela.`}
         footer={
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
             {linkContingencia && (
@@ -110,7 +118,7 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
             icone={<Send className="h-4 w-4" />}
             titulo="Aviso no sistema"
             ok
-            detalhe="Aparece no sino de notificações"
+            detalhe={resultado.convite ? "Aparece no sino assim que criar a senha" : "Aparece no sino de notificações"}
           />
         </ul>
         {linkContingencia && (
@@ -131,7 +139,7 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
       footer={
         <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:justify-end">
           <Button variant="outline" className="h-11" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button className="h-11" disabled={!userId || notificar.isPending || pendentes === 0} onClick={enviar}>
+          <Button className="h-11" disabled={!escolhido || notificar.isPending || pendentes === 0} onClick={enviar}>
             {notificar.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
             Salvar e notificar
           </Button>
@@ -146,20 +154,25 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
           ) : error ? (
             <p className="text-sm text-destructive">Não foi possível listar os responsáveis da empresa.</p>
           ) : responsaveis.length === 0 ? (
-            <p className="text-sm text-muted-foreground">A empresa ainda não tem dono ou administrador com acesso ativo.</p>
+            <p className="text-sm text-muted-foreground">A empresa ainda não tem dono, administrador ou gestor convidado.</p>
           ) : (
-            <Select value={userId ?? undefined} onValueChange={setUserId}>
+            <Select value={chave ?? undefined} onValueChange={setChave}>
               <SelectTrigger className="h-11"><SelectValue placeholder="Escolha a pessoa" /></SelectTrigger>
               <SelectContent>
                 {responsaveis.map((r) => (
-                  <SelectItem key={r.user_id} value={r.user_id}>
-                    {r.nome}{r.perfil === "owner" ? " · Dono" : " · Admin"}
+                  <SelectItem key={chaveResponsavel(r)} value={chaveResponsavel(r)}>
+                    {r.nome}{r.pendente ? " · Aguardando primeiro acesso" : r.perfil === "owner" ? " · Dono" : " · Admin"}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           )}
-          {escolhido && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Mail className="h-3.5 w-3.5" /> {escolhido.email}</p>}
+          {escolhido?.email && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Mail className="h-3.5 w-3.5" /> {escolhido.email}</p>}
+          {pendente && (
+            <p className="text-xs text-muted-foreground">
+              Ainda não criou a senha: recebe o link de primeiro acesso junto com o aviso das fichas.
+            </p>
+          )}
         </div>
 
         {escolhido && (
@@ -188,7 +201,9 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
           <p className="font-medium">Mensagem da equipe Aveto 360</p>
           <p className="text-muted-foreground">
             Já organizamos {pendentes} {pendentes === 1 ? "ficha de registro" : "fichas de registro"} da {empresaNome}: unidade,
-            cargos e setores estão configurados. Agora é só conferir os dados da equipe e concluir os cadastros.
+            cargos e setores estão configurados. {pendente
+              ? "Crie sua senha pelo link e confira os cadastros. No primeiro acesso você informa se é o proprietário ou o administrador da empresa."
+              : "Agora é só conferir os dados da equipe e concluir os cadastros."}
           </p>
         </div>
       </div>

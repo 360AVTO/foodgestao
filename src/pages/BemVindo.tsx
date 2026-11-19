@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { lerCorpo } from "@/lib/auth/invite";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -29,7 +30,12 @@ export default function BemVindo() {
     setAcceptingId(inviteId);
     try {
       const { data, error } = await supabase.functions.invoke("accept-invite", { body: { invite_id: inviteId } });
-      const errMsg = (data as any)?.error || error?.message;
+      const corpo = await lerCorpo(data, error);
+      if (corpo?.code === "definir_titular" && corpo.token) {
+        navigate(`/convite/${corpo.token}`);
+        return;
+      }
+      const errMsg = corpo?.error || error?.message;
       if (errMsg) {
         toast.error("Não foi possível aceitar o convite", { description: errMsg });
         return;

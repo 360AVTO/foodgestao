@@ -1793,6 +1793,20 @@
       "when": 1795107077788,
       "tag": "0255_rastro_troca_e_certificados",
       "breakpoints": true
+    },
+    {
+      "idx": 256,
+      "version": "7",
+      "when": 1795123810656,
+      "tag": "0256_titularidade_ativacao_concierge",
+      "breakpoints": true
+    },
+    {
+      "idx": 257,
+      "version": "7",
+      "when": 1795123932988,
+      "tag": "0257_concierge_ativar_corrige_modulos",
+      "breakpoints": true
     }
   ]
 }

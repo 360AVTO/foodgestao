@@ -31,8 +31,6 @@
 - Certificate external files are rendered and serialized in isolated PDFs before copying pages; keep originals and acceptance evidence unchanged when reproduction fails.
 - Admission review saves through the shared form before navigation and reports finalization failures separately; post-review actions reuse official ASO and document workflows. CLT effectivation without a returned registration uses the official audited confirmation only after valid ASO and confirmed accounting dispatch; preserve server authorization and keep the document dialog mounted after effectivation.
 - Portal document signing uses a single "Visualizar e Assinar" button opening the full-screen `DocumentoAssinarViewer`; multi-page PDFs require per-page rubric taps (rules in `src/lib/dp/rubrica.ts`) before the final signature is enabled — never reintroduce a locked sign button waiting for a separate preview.
-- Unit holiday registration uses the frontend date-order helper with the selected year; retain inactive and non-occurring rules for editing separately from the active annual agenda.
-- Unit tabs use a dedicated horizontal scroller with edge controls and active-tab visibility; holiday presentation labels and counts stay in the frontend adapter to preserve stored identifiers and records.
 - Holiday category is independent of date calculation; the additive v2 resolver keeps the legacy RPC compatible, and calendars retain all same-day categories through shared presentation helpers (Pessoas/Escala).
 - Movable holidays use explicit unit-selected codes and Gregorian computus in the shared helper and database resolver; include the code in reads and replication to keep annual dates consistent without scheduled jobs or automatic holiday enrollment.
 - National holiday enrollment defaults to federal fixed dates; its confirmation dialog may include Good Friday only through explicit local opt-in, using the movable code and preserving existing/inactive rules, because Law 9,093/1995, article 2 requires municipal legislation.
@@ -65,5 +63,5 @@
 - Reconciliation may settle an existing pending entry (same type, exact open amount, no date limit) via `pluggy_conciliacao_baixar`, which revalidates server-side to avoid duplicates.
 - Signature pendencies of terminated employees close only after the portal access window (data_desligamento + 30 days) via the daily server job `private.dp_encerrar_pendencias_desligados` (marks `assinatura_dispensada_em`, never deletes/archives); rescission/physical-signature types are excluded to keep legal evidence.
 - Onboarding reconciles the signup trial with the selected modules via `fn_onboarding_sincronizar_trial` (converts an unchosen signup trial instead of burning it, covers every chosen module) so v2 access matches what the client picked.
-- Concierge: super admin is temporary owner; server-only `concierge_ativar` transfers ownership, starts trial on activation.
+- Concierge: super admin is temporary owner; the admin-invited manager answers owner/admin on first access and server-only `concierge_ativar` transfers ownership.
 - Onboarding never copies company phones into `profiles.phone` (notices reach the signer).

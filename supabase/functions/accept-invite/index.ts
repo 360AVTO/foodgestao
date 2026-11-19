@@ -1,6 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { strictCorsHeaders } from "../_shared/http.ts";
-import { aplicarGrupoConvite, waEmail } from "../_shared/company-invite-accept.ts";
+import {
+  aplicarGrupoConvite, conciergePendenteDoGrupo, conferirTitularidade, waEmail,
+} from "../_shared/company-invite-accept.ts";
 
 function getCorsHeaders(req: Request) {
   return {
@@ -94,9 +96,30 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Empresa preparada pela Aveto: escolha de proprietário/administrador feita na tela.
+    const definirTitular = await conciergePendenteDoGrupo(adminClient, invite.grupo_id);
+    if (definirTitular && !body?.titularidade) {
+      // Aceite automático (após login) ou pela lista de convites: a pessoa precisa responder na tela do convite.
+      return new Response(JSON.stringify({
+        code: "definir_titular",
+        token: invite.token,
+        error: "Antes de entrar, informe se você é o proprietário ou o administrador da empresa.",
+      }), { status: 409, headers: { ...corsHeaders, "Content-Type": "application/json" } });
+    }
+    const tit = definirTitular ? conferirTitularidade(body?.titularidade ?? null, invite.whatsapp) : null;
+    if (tit && !tit.ok) {
+      return new Response(JSON.stringify({ code: "titularidade_invalida", campo: tit.campo, error: tit.erro }), {
+        status: 400,
+        headers: { ...corsHeaders, "Content-Type": "application/json" },
+      });
+    }
+
     let empresas: string[] = [];
+    let papel: "owner" | "admin" | null = null;
+    let proprietario: unknown = null;
     try {
-      empresas = await aplicarGrupoConvite(adminClient, invite.grupo_id, user.id);
+      const r = await aplicarGrupoConvite(adminClient, invite.grupo_id, user.id, tit?.ok ? tit.valor : null);
+      empresas = r.empresas; papel = r.papel; proprietario = r.proprietario;
     } catch {
       return new Response(JSON.stringify({ error: "Erro ao processar convite" }), {
         status: 500,
@@ -107,6 +130,8 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({
       success: true,
       company_name: empresas.join(", ") || invite.companies?.name,
+      papel,
+      proprietario,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },
     });

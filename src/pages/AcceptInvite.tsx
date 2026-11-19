@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,6 +10,11 @@ import { BlocoNovaSenha, focarCampoSenha } from "@/components/auth/BlocoNovaSenh
 import { motivoSenhaPendente } from "@/lib/security/novaSenha";
 import { INVITE_TOKEN_KEY } from "@/lib/auth/invite";
 import { rotuloLogin } from "@/lib/convites-identidade";
+import { validarTitularidade, type EntradaTitularidade } from "@/lib/convite-titularidade";
+import { TitularidadeConvite, type ErroTitularidade } from "@/components/auth/TitularidadeConvite";
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+type ProprietarioAvisado = { nome: string | null; enviado: boolean; final: string | null } | null;
 
 type Info = {
   nome: string | null;
@@ -19,6 +24,8 @@ type Info = {
   conta_existe: boolean;
   /** Conta exata a que o convite foi vinculado. */
   login_exibicao?: string;
+  /** Empresa preparada pela Aveto: a pessoa informa se é o proprietário ou o administrador. */
+  definir_titular?: boolean;
 };
 type Status = "loading" | "ready" | "criar" | "accepted" | "ja_ativo" | "outra_conta" | "error" | "expired";
 
@@ -36,6 +43,13 @@ export default function AcceptInvite() {
   const { token } = useParams<{ token: string }>();
   const { user, loading: authLoading } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const loteParam = searchParams.get("lote");
+  const lote = loteParam && UUID_RE.test(loteParam) ? loteParam : null;
+  const [tit, setTit] = useState<EntradaTitularidade>({ papel: null, proprietarioNome: "", proprietarioWhatsapp: "", convidarProprietario: true });
+  const [erroTit, setErroTit] = useState<ErroTitularidade>(null);
+  const [proprietario, setProprietario] = useState<ProprietarioAvisado>(null);
+  const [papelFinal, setPapelFinal] = useState<"owner" | "admin" | null>(null);
   const [status, setStatus] = useState<Status>("loading");
   const [info, setInfo] = useState<Info | null>(null);
   const [companyName, setCompanyName] = useState("");
@@ -87,6 +101,30 @@ export default function AcceptInvite() {
     navigate(`/login${l}`, { replace: true });
   };
 
+  /** Escolha de titularidade pronta para enviar; `false` quando a tela precisa de correção. */
+  const titularidadeParaEnvio = (): EntradaTitularidade | null | false => {
+    if (!info?.definir_titular) return null;
+    const v = validarTitularidade(tit);
+    if (!v.ok || !v.valor) { setErroTit({ campo: v.campo ?? "papel", erro: v.erro ?? "Confira os dados." }); return false; }
+    setErroTit(null);
+    return v.valor;
+  };
+
+  /** Recusa da regra de titularidade vinda do servidor: mostra no campo certo. */
+  const tratarRecusaTitularidade = (d: any): boolean => {
+    if (d?.code !== "titularidade_invalida") return false;
+    const campo = d.campo === "nome" || d.campo === "whatsapp" ? d.campo : "papel";
+    setErroTit({ campo, erro: String(d.error ?? "Confira os dados do proprietário.") });
+    return true;
+  };
+
+  const concluido = (d: any) => {
+    setProprietario((d?.proprietario as ProprietarioAvisado) ?? null);
+    setPapelFinal(d?.papel === "admin" || d?.papel === "owner" ? d.papel : null);
+  };
+
+  const destinoInicial = lote ? `/dp/colaboradores/importar-ficha?lote=${lote}` : "/hub";
+
   const trocarConta = async () => {
     setBusy(true);
     await supabase.auth.signOut();
@@ -96,13 +134,18 @@ export default function AcceptInvite() {
 
   const handleAccept = async () => {
     if (!user || !token) return;
+    const titularidade = titularidadeParaEnvio();
+    if (titularidade === false) return;
     setBusy(true);
-    const { data, error } = await supabase.functions.invoke("accept-invite", { body: { token } });
+    const { data, error } = await supabase.functions.invoke("accept-invite", {
+      body: titularidade ? { token, titularidade } : { token },
+    });
     let d = data as any;
     if (error && !d) {
       try { d = await (error as any).context?.json(); } catch { /* sem corpo legível */ }
     }
     const msg = d?.error || error?.message;
+    if (msg && tratarRecusaTitularidade(d)) { setBusy(false); return; }
     if (msg) {
       if (/expirad|expired/i.test(msg)) setStatus("expired");
       else if (outraConta(msg)) setStatus("outra_conta");
@@ -111,6 +154,7 @@ export default function AcceptInvite() {
     } else {
       setStatus("accepted");
       setCompanyName((data as any)?.company_name ?? "");
+      concluido(data);
     }
     setBusy(false);
   };
@@ -122,11 +166,13 @@ export default function AcceptInvite() {
   const handleCriar = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!token) return;
+    const titularidade = titularidadeParaEnvio();
+    if (titularidade === false) return;
     if (motivoSenha) { setTentou(true); focarCampoSenha(); return; }
     setErroSenha(null);
     setBusy(true);
     const { data, error } = await supabase.functions.invoke("invite-signup", {
-      body: { action: "criar_conta", token, password: senha },
+      body: { action: "criar_conta", token, password: senha, ...(titularidade ? { titularidade } : {}) },
     });
     let d = data as any;
     // Respostas 4xx chegam como exceção: lê o corpo para saber o motivo real.
@@ -134,7 +180,8 @@ export default function AcceptInvite() {
       try { d = await (error as any).context?.json(); } catch { /* sem corpo legível */ }
     }
     if (error || d?.error) {
-      if (d?.code === "conta_existe") { toast.info(d.error); irParaLogin(); }
+      if (tratarRecusaTitularidade(d)) { /* mostrado no campo */ }
+      else if (d?.code === "conta_existe") { toast.info(d.error); irParaLogin(); }
       // Recusa da regra de senha (ex.: contém parte do e-mail completo, que a
       // tela não conhece): mostra junto do campo, não só num aviso passageiro.
       else if (d?.code === "senha_fraca") { setErroSenha(d.error); focarCampoSenha(); }
@@ -146,6 +193,7 @@ export default function AcceptInvite() {
     setBusy(false);
     if (signErr) { toast.success("Conta criada! Entre com sua senha."); navigate("/login"); return; }
     setCompanyName((d.empresas ?? []).join(", "));
+    concluido(d);
     setStatus("accepted");
   };
 
@@ -191,6 +239,9 @@ export default function AcceptInvite() {
                   <p className="text-xs text-muted-foreground">
                     Seu login será o {info.login === "email" ? "e-mail" : "WhatsApp"} <strong>{info.login_hint}</strong>.
                   </p>
+                  {info.definir_titular && (
+                    <TitularidadeConvite empresa={info.empresas[0] ?? "empresa"} valor={tit} onChange={(v) => { setTit(v); setErroTit(null); }} erro={erroTit} />
+                  )}
                   <BlocoNovaSenha
                     senha={senha}
                     confirma={confirma}
@@ -225,6 +276,11 @@ export default function AcceptInvite() {
                 <div className="w-full rounded-md border bg-muted/40 p-3 text-sm">
                   <p className="text-muted-foreground">Convite vinculado à conta</p>
                   <p className="mt-0.5 break-all font-semibold text-foreground">{loginVinculado}</p>
+                </div>
+              )}
+              {info?.definir_titular && (
+                <div className="w-full">
+                  <TitularidadeConvite empresa={info.empresas[0] ?? "empresa"} valor={tit} onChange={(v) => { setTit(v); setErroTit(null); }} erro={erroTit} />
                 </div>
               )}
               <Button onClick={handleAccept} disabled={busy} className="w-full min-h-11">
@@ -270,10 +326,31 @@ export default function AcceptInvite() {
             <CardHeader className="text-center">
               <div className="mx-auto mb-2"><CheckCircle className="h-12 w-12 text-primary" /></div>
               <CardTitle>Acesso Liberado!</CardTitle>
-              <CardDescription>Você agora faz parte de{companyName ? ` ${companyName}` : " uma empresa"}.</CardDescription>
+              <CardDescription>
+                {papelFinal === "owner"
+                  ? `Você é o Dono de${companyName ? ` ${companyName}` : " uma empresa"}.`
+                  : papelFinal === "admin"
+                    ? `Você é Administrador de${companyName ? ` ${companyName}` : " uma empresa"}.`
+                    : `Você agora faz parte de${companyName ? ` ${companyName}` : " uma empresa"}.`}
+              </CardDescription>
             </CardHeader>
-            <CardContent>
-              <Button onClick={() => navigate("/hub")} className="w-full">Começar</Button>
+            <CardContent className="space-y-3">
+              {proprietario && (
+                <div className="rounded-md border bg-muted/40 p-3 text-sm">
+                  {proprietario.enviado ? (
+                    <p className="text-muted-foreground">
+                      Enviamos o convite de Dono para {proprietario.nome ?? "o proprietário"} pelo WhatsApp com final {proprietario.final}.
+                    </p>
+                  ) : (
+                    <p className="text-muted-foreground">
+                      Não conseguimos enviar o convite ao proprietário pelo WhatsApp agora. Você pode reenviar em Gestão de Usuários.
+                    </p>
+                  )}
+                </div>
+              )}
+              <Button onClick={() => navigate(destinoInicial)} className="w-full min-h-11">
+                {lote ? "Conferir as fichas da equipe" : "Começar"}
+              </Button>
             </CardContent>
           </>
         )}

@@ -331,7 +331,7 @@ export function ConciergePainel() {
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>Preparar Empresa para o Cliente</DialogTitle>
-            <DialogDescription>A empresa fica com a Aveto até o gestor criar a senha; depois ele vira o Dono e a Aveto sai.</DialogDescription>
+            <DialogDescription>A empresa fica com a Aveto até o gestor criar a senha. No primeiro acesso ele informa se é o proprietário ou o administrador (e, como administrador, quem é o dono); depois a Aveto sai.</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">

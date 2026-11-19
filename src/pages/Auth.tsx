@@ -208,7 +208,7 @@ export default function Auth() {
       setPassword("");
       if (e2) { switchMode("login"); return; }
       const consumed = await consumePendingInviteToken();
-      navigate(consumed.accepted ? "/hub" : "/onboarding", { replace: true });
+      navigate(consumed.redirect ?? (consumed.accepted ? "/hub" : "/onboarding"), { replace: true });
     } finally {
       setVerificandoOtp(false);
     }
@@ -279,6 +279,7 @@ export default function Auth() {
     // Convite aberto pelo link do e-mail antes do login: aceita direto.
     try {
       const consumed = await consumePendingInviteToken();
+      if (consumed.redirect) return consumed.redirect;
       if (consumed.accepted) {
         toast.success("Convite aceito!", {
           description: consumed.companyName
@@ -480,7 +481,9 @@ export default function Auth() {
             } else {
               toast.success("Cadastro realizado!");
               const consumed = await consumePendingInviteToken();
-              if (consumed.accepted) {
+              if (consumed.redirect) {
+                navigate(consumed.redirect, { replace: true });
+              } else if (consumed.accepted) {
                 toast.success("Convite aceito!", {
                   description: consumed.companyName
                     ? `Você já tem acesso a ${consumed.companyName}.`

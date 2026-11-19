@@ -11,12 +11,22 @@ import { z } from "npm:zod@3.23.8";
 import { jsonError, jsonResponse, strictCorsHeaders } from "../_shared/http.ts";
 import { ipRateLimited } from "../_shared/rate-limit.ts";
 import { avaliarSenha } from "../_shared/password-policy.ts";
-import { aplicarGrupoConvite, waEmail } from "../_shared/company-invite-accept.ts";
+import {
+  aplicarGrupoConvite, conciergePendenteDoGrupo, conferirTitularidade, waEmail,
+} from "../_shared/company-invite-accept.ts";
+
+const TitularidadeBody = z.object({
+  papel: z.enum(["owner", "admin"]),
+  proprietarioNome: z.string().max(120).nullish(),
+  proprietarioWhatsapp: z.string().max(30).nullish(),
+  convidarProprietario: z.boolean().nullish(),
+});
 
 const Body = z.object({
   action: z.enum(["info", "criar_conta"]),
   token: z.string().trim().min(16).max(256).regex(/^[0-9a-f]+$/i),
   password: z.string().max(200).optional(),
+  titularidade: TitularidadeBody.optional(),
 });
 
 Deno.serve(async (req) => {
@@ -26,7 +36,7 @@ Deno.serve(async (req) => {
   try {
     const parsed = Body.safeParse(await req.json().catch(() => ({})));
     if (!parsed.success) return jsonError(req, "invalid_input");
-    const { action, token, password } = parsed.data;
+    const { action, token, password, titularidade } = parsed.data;
 
     const admin = createClient(Deno.env.get("SUPABASE_URL")!, Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!);
     if (await ipRateLimited(admin, req, `invite-signup:${action}`, action === "info" ? 60 : 10)) {
@@ -53,6 +63,8 @@ Deno.serve(async (req) => {
 
     const { data: existente } = await admin.rpc("resolve_login_identifier", { _identifier: loginEmail });
     const contaExiste = Array.isArray(existente) && existente.length > 0;
+    // Empresa preparada pela Aveto: no primeiro acesso o gestor informa se é o proprietário ou o administrador.
+    const definirTitular = await conciergePendenteDoGrupo(admin, invite.grupo_id);
 
     if (action === "info") {
       await admin.from("concierge_provisionamentos").update({ link_aberto_em: new Date().toISOString() })
@@ -67,6 +79,7 @@ Deno.serve(async (req) => {
           ? String(invite.invited_email).replace(/^(.{2}).*(@.*)$/, "$1***$2")
           : `(**) *****-${String(invite.whatsapp ?? "").slice(-4)}`,
         conta_existe: contaExiste,
+        definir_titular: definirTitular,
         // Conta exata a que o convite foi vinculado (quem tem o link precisa reconhecê-la).
         login_exibicao: invite.invited_email
           ? String(invite.invited_email).toLowerCase()
@@ -76,6 +89,12 @@ Deno.serve(async (req) => {
 
     if (contaExiste) {
       return jsonResponse(req, 409, { code: "conta_existe", error: "Você já tem conta. Entre com sua senha para aceitar o convite." });
+    }
+    const tit = definirTitular
+      ? conferirTitularidade(titularidade ?? { papel: null }, invite.whatsapp)
+      : null;
+    if (tit && !tit.ok) {
+      return jsonResponse(req, 400, { code: "titularidade_invalida", campo: tit.campo, error: tit.erro });
     }
     const aval = avaliarSenha(password ?? "", { nome: invite.full_name, email: invite.invited_email });
     if (!aval.valida) return jsonResponse(req, 400, { code: "senha_fraca", error: aval.mensagem });
@@ -92,9 +111,11 @@ Deno.serve(async (req) => {
     const userId = created.data.user.id;
 
     await admin.from("profiles").update({ full_name: invite.full_name, phone: invite.whatsapp }).eq("user_id", userId);
-    const empresas = await aplicarGrupoConvite(admin, invite.grupo_id, userId);
+    const r = await aplicarGrupoConvite(admin, invite.grupo_id, userId, tit?.ok ? tit.valor : null);
 
-    return jsonResponse(req, 200, { success: true, login_email: loginEmail, empresas });
+    return jsonResponse(req, 200, {
+      success: true, login_email: loginEmail, empresas: r.empresas, papel: r.papel, proprietario: r.proprietario,
+    });
   } catch (e) {
     return jsonError(req, "internal", e);
   }
