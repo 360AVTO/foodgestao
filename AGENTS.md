@@ -65,3 +65,4 @@
 - Onboarding reconciles the signup trial with the selected modules via `fn_onboarding_sincronizar_trial` (converts an unchosen signup trial instead of burning it, covers every chosen module) so v2 access matches what the client picked.
 - Concierge: super admin is temporary owner; the admin-invited manager answers owner/admin on first access and server-only `concierge_ativar` transfers ownership.
 - Onboarding never copies company phones into `profiles.phone` (notices reach the signer).
+- Onboarding counts as complete only with an active company; `/onboarding` stays open to non-portal users without one, so legacy completed flags cannot loop `/bem-vindo`.

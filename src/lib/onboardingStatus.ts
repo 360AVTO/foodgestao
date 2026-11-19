@@ -101,7 +101,9 @@ export async function resolveOnboardingStatus(userId: string): Promise<Onboardin
     // o usuário na tela de espera das verificações de entrada.
     r = await comLimiteDeTempo(consultarOnboardingStatus(userId), ONBOARDING_STATUS_TIMEOUT_MS);
   }
-  if (r.completed) cacheConcluido.set(userId, { em: Date.now(), valor: r });
+  // Sem empresa ativa não guardamos: a pessoa pode criá-la ou aceitar um
+  // convite a qualquer momento, e a próxima tela precisa enxergar isso.
+  if (r.completed && r.companyId) cacheConcluido.set(userId, { em: Date.now(), valor: r });
   return r;
 }
 

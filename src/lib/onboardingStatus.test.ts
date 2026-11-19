@@ -106,4 +106,12 @@ describe("onboardingStatus", () => {
     expect(result).toEqual({ completed: false, companyId: null });
     expect(marcarOnboardingConcluido).not.toHaveBeenCalled();
   });
+
+  it("não guarda em memória o status concluído de conta sem empresa ativa", async () => {
+    responses.profiles = { data: { onboarding_completed: true }, error: null };
+    await expect(resolveOnboardingStatus("sem-empresa")).resolves.toEqual({ completed: true, companyId: null });
+    calls.length = 0;
+    await resolveOnboardingStatus("sem-empresa");
+    expect(calls.some((c) => c.table === "profiles")).toBe(true);
+  });
 });

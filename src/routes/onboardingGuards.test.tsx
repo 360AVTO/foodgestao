@@ -42,6 +42,12 @@ vi.mock("@/lib/onboardingStatus", () => ({
   limparOnboardingStatusCache: () => {},
 }));
 
+const resolveLandingTargetMock = vi.fn();
+vi.mock("@/lib/auth/landing", () => ({
+  resolveLandingTarget: (...args: unknown[]) => resolveLandingTargetMock(...args),
+  PORTAL_PATH: "/dp/meu",
+}));
+
 import { ProtectedRoute, OnboardingGuard } from "@/routes/onboardingGuards";
 
 function HubPage() {
@@ -63,6 +69,7 @@ function renderAt(pathname: string) {
             </ProtectedRoute>
           }
         />
+        <Route path="/dp/meu" element={<div data-testid="portal-page">PORTAL</div>} />
         <Route
           path="/onboarding"
           element={
@@ -79,6 +86,8 @@ function renderAt(pathname: string) {
 describe("[e2e] Login com onboarding_completed=true", () => {
   beforeEach(() => {
     resolveOnboardingStatusMock.mockReset();
+    resolveLandingTargetMock.mockReset();
+    resolveLandingTargetMock.mockResolvedValue({ kind: "hub" });
     setContextMock.mockReset();
   });
 
@@ -127,5 +136,35 @@ describe("[e2e] Login com onboarding_completed=true", () => {
     expect(screen.queryByTestId("onboarding-page")).not.toBeInTheDocument();
     // Sem companyId, o contexto PJ não deve ser forçado.
     expect(setContextMock).not.toHaveBeenCalled();
+  });
+
+  it("libera o assistente para conta marcada como concluída mas sem empresa ativa (evita ciclo /bem-vindo)", async () => {
+    resolveOnboardingStatusMock.mockResolvedValue({
+      completed: true,
+      companyId: null,
+    });
+    resolveLandingTargetMock.mockResolvedValue({ kind: "hub" });
+
+    renderAt("/onboarding");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("onboarding-page")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("hub-page")).not.toBeInTheDocument();
+  });
+
+  it("colaborador sem empresa continua indo ao portal, nunca ao assistente", async () => {
+    resolveOnboardingStatusMock.mockResolvedValue({
+      completed: true,
+      companyId: null,
+    });
+    resolveLandingTargetMock.mockResolvedValue({ kind: "portal" });
+
+    renderAt("/onboarding");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("portal-page")).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId("onboarding-page")).not.toBeInTheDocument();
   });
 });

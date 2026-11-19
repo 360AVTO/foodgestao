@@ -222,13 +222,17 @@ export function ProtectedRoute({ children }: { children: React.ReactNode }) {
 /**
  * Guarda do wizard de onboarding.
  *
- * Se o onboarding já está concluído, redireciona para `/hub` para evitar
- * loop de cadastro em contas existentes.
+ * Com empresa ativa, redireciona para `/hub` (evita refazer o cadastro).
+ * Sem empresa ativa o assistente fica liberado mesmo com
+ * `onboarding_completed=true` — é o único caminho para criar a empresa.
  */
 export function OnboardingGuard({ children }: { children: React.ReactNode }) {
   const { user, loading } = useAuth();
   const { setContext, selectedCompanyId } = useCompanyContext();
   const [checking, setChecking] = useState(true);
+  // "Concluído" só vale com empresa ativa: conta antiga marcada como concluída
+  // sem empresa precisa do assistente para criar a sua (senão /bem-vindo →
+  // /onboarding → /hub → /bem-vindo vira um ciclo sem saída).
   const [completed, setCompleted] = useState(false);
   const [cadastroFalhou, setCadastroFalhou] = useState(false);
 
@@ -248,7 +252,7 @@ export function OnboardingGuard({ children }: { children: React.ReactNode }) {
         // contrário, cada navegação/recarga sobrescrevia a empresa
         // selecionada no seletor do topo.
         if (completed && companyId && !selectedCompanyId) setContext("pj", companyId);
-        setCompleted(completed);
+        setCompleted(completed && !!companyId);
         setChecking(false);
       })
       .catch((error) => {
