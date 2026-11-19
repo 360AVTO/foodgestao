@@ -1786,6 +1786,13 @@
       "when": 1795105659292,
       "tag": "0254_fechar_aceite_direto",
       "breakpoints": true
+    },
+    {
+      "idx": 255,
+      "version": "7",
+      "when": 1795107077788,
+      "tag": "0255_rastro_troca_e_certificados",
+      "breakpoints": true
     }
   ]
 }

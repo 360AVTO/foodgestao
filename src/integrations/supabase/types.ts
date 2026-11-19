@@ -9037,6 +9037,67 @@ export type Database = {
           },
         ]
       }
+      dp_documento_certificados: {
+        Row: {
+          aceite_id: string | null
+          codigo: string
+          company_id: string
+          documento_id: string
+          gerado_em: string
+          gerado_por: string | null
+          id: string
+          paginas: number | null
+          sha256: string
+          tamanho_bytes: number
+        }
+        Insert: {
+          aceite_id?: string | null
+          codigo: string
+          company_id: string
+          documento_id: string
+          gerado_em?: string
+          gerado_por?: string | null
+          id?: string
+          paginas?: number | null
+          sha256: string
+          tamanho_bytes: number
+        }
+        Update: {
+          aceite_id?: string | null
+          codigo?: string
+          company_id?: string
+          documento_id?: string
+          gerado_em?: string
+          gerado_por?: string | null
+          id?: string
+          paginas?: number | null
+          sha256?: string
+          tamanho_bytes?: number
+        }
+        Relationships: [
+          {
+            foreignKeyName: "dp_documento_certificados_aceite_id_fkey"
+            columns: ["aceite_id"]
+            isOneToOne: false
+            referencedRelation: "dp_documento_aceites"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dp_documento_certificados_company_id_fkey"
+            columns: ["company_id"]
+            isOneToOne: false
+            referencedRelation: "companies"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "dp_documento_certificados_documento_id_fkey"
+            columns: ["documento_id"]
+            isOneToOne: false
+            referencedRelation: "dp_documentos"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       dp_documento_comprovantes: {
         Row: {
           company_id: string
@@ -14097,6 +14158,8 @@ export type Database = {
           destino_assinado_em: string | null
           destino_assinatura: string | null
           destino_id: string
+          destino_ip: string | null
+          destino_user_agent: string | null
           gestor_id: string | null
           gestor_requisicao: string | null
           gestor_respondido_em: string | null
@@ -14109,6 +14172,8 @@ export type Database = {
           solicitante_assinado_em: string | null
           solicitante_assinatura: string | null
           solicitante_id: string
+          solicitante_ip: string | null
+          solicitante_user_agent: string | null
           status: Database["public"]["Enums"]["dp_troca_status"]
           updated_at: string
         }
@@ -14128,6 +14193,8 @@ export type Database = {
           destino_assinado_em?: string | null
           destino_assinatura?: string | null
           destino_id: string
+          destino_ip?: string | null
+          destino_user_agent?: string | null
           gestor_id?: string | null
           gestor_requisicao?: string | null
           gestor_respondido_em?: string | null
@@ -14140,6 +14207,8 @@ export type Database = {
           solicitante_assinado_em?: string | null
           solicitante_assinatura?: string | null
           solicitante_id: string
+          solicitante_ip?: string | null
+          solicitante_user_agent?: string | null
           status?: Database["public"]["Enums"]["dp_troca_status"]
           updated_at?: string
         }
@@ -14159,6 +14228,8 @@ export type Database = {
           destino_assinado_em?: string | null
           destino_assinatura?: string | null
           destino_id?: string
+          destino_ip?: string | null
+          destino_user_agent?: string | null
           gestor_id?: string | null
           gestor_requisicao?: string | null
           gestor_respondido_em?: string | null
@@ -14171,6 +14242,8 @@ export type Database = {
           solicitante_assinado_em?: string | null
           solicitante_assinatura?: string | null
           solicitante_id?: string
+          solicitante_ip?: string | null
+          solicitante_user_agent?: string | null
           status?: Database["public"]["Enums"]["dp_troca_status"]
           updated_at?: string
         }

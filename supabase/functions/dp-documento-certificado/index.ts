@@ -19,6 +19,7 @@ import { centsParaBRL, resumoQuitacao, valorPorExtenso } from "../_shared/quitac
 import { estadoRecibo, recibosVinculados, sufixoCacheRecibos, type EstadoRecibo, type ReciboVinculadoRef } from "./recibo-vinculado.ts";
 import { assinarCampoReciboEspecie } from "./recibo-especie-assinado.ts";
 import { sha256Hex } from "../_shared/doc-hash.ts";
+import { codigoCertificado, registrarCertificado } from "./certificado-registro.ts";
 import { desenharAssinatura, embutirAssinatura, rubricarPaginas } from "../_shared/assinatura-pdf.ts";
 import { montarReciboPdf, reciboDaLinha } from "../_shared/recibo-pdf.ts";
 import { assinarCampoTermoFolga } from "./termo-folga-assinado.ts";
@@ -477,7 +478,7 @@ async function montarArquivo(
 }
 
 /** Rodapé de lastro em todas as páginas, no fim da montagem. */
-function rodape(pdf: PDFDocument, fonte: PDFFont, d: Dados): void {
+function rodape(pdf: PDFDocument, fonte: PDFFont, d: Dados, codigo: string): void {
   const paginas = pdf.getPages();
   const total = paginas.length;
   const hash = d.conteudoHash ? `${d.conteudoHash.slice(0, 28)}${d.conteudoHash.length > 28 ? "..." : ""}` : "—";
@@ -485,7 +486,7 @@ function rodape(pdf: PDFDocument, fonte: PDFFont, d: Dados): void {
     `${d.empresa} · ${d.colaborador} · ${d.documentoTitulo}`,
   );
   const linha2 = limpar(
-    `Aprovado em ${dataHora(d.aceitoEm)} · Registro ${d.registroId} · Conteúdo ${hash}`,
+    `Aprovado em ${dataHora(d.aceitoEm)} · Registro ${d.registroId} · Conteúdo ${hash} · Certificado ${codigo}`,
   );
   const linha3 = limpar(MARCA_ASSINATURA);
   paginas.forEach((page: PDFPage, i: number) => {
@@ -498,7 +499,7 @@ function rodape(pdf: PDFDocument, fonte: PDFFont, d: Dados): void {
     });
     page.drawRectangle({ x: margem, y: 38.4, width: 54, height: 1.6, color: rgb(0.92, 0.38, 0.1) });
     page.drawText(linha1.slice(0, 130), { x: margem, y: 28, size: 6.5, font: fonte, color: rgb(0.4, 0.4, 0.4) });
-    page.drawText(linha2.slice(0, 150), { x: margem, y: 18, size: 6.5, font: fonte, color: rgb(0.4, 0.4, 0.4) });
+    page.drawText(linha2.slice(0, 170), { x: margem, y: 18, size: 6.5, font: fonte, color: rgb(0.4, 0.4, 0.4) });
     page.drawText(linha3, { x: margem, y: 8, size: 6.5, font: fonte, color: rgb(0.06, 0.11, 0.24) });
     const pag = `Página ${i + 1} de ${total}`;
     page.drawText(pag, {
@@ -599,11 +600,17 @@ Deno.serve(async (req) => {
     const chaveCache = [
       registro.company_id,
       "certificados",
-      `${documentoId}-${aceite.id}-${encodeURIComponent(String(comp?.file_path ?? "sem-comprovante")).replace(/%/g, "")}-${String(registro.comprovante_pago_em ?? "").slice(0, 10)}-${String(registro.versao ?? 1)}-${sufixoRecibos}-r7.pdf`,
+      `${documentoId}-${aceite.id}-${encodeURIComponent(String(comp?.file_path ?? "sem-comprovante")).replace(/%/g, "")}-${String(registro.comprovante_pago_em ?? "").slice(0, 10)}-${String(registro.versao ?? 1)}-${sufixoRecibos}-r8.pdf`,
     ].join("/");
+    const codigo = await codigoCertificado(chaveCache);
     const pronto = await admin.storage.from(BUCKET).download(chaveCache);
     if (pronto.data && !pronto.error) {
-      return new Response(await pronto.data.arrayBuffer(), {
+      const guardado = await pronto.data.arrayBuffer();
+      await registrarCertificado(admin, {
+        companyId: String(registro.company_id), documentoId, aceiteId: String(aceite.id), codigo,
+        bytes: new Uint8Array(guardado), paginas: null, geradoPor: caller.id,
+      });
+      return new Response(guardado, {
         status: 200,
         headers: {
           ...corsHeaders,
@@ -889,10 +896,16 @@ Deno.serve(async (req) => {
       }
     }
 
-    rodape(pdf, fonte, dados);
+    rodape(pdf, fonte, dados, codigo);
     if (imgAssinatura) rubricarPaginas(pdf, imgAssinatura, fonte, 44);
 
     const bytes = await pdf.save();
+    // Impressão digital do PDF final, ligada ao código do rodapé: qualquer
+    // alteração posterior no arquivo deixa de conferir com o registro.
+    await registrarCertificado(admin, {
+      companyId: String(registro.company_id), documentoId, aceiteId: String(aceite.id), codigo,
+      bytes, paginas: pdf.getPageCount(), geradoPor: caller.id,
+    });
     await admin.storage.from(BUCKET).upload(chaveCache, bytes, {
       contentType: "application/pdf",
       upsert: true,

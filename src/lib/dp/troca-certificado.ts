@@ -18,6 +18,22 @@ function dh(iso: string | null) {
   return new Date(iso).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" });
 }
 
+/** Resumo legível do aparelho (sistema · navegador) a partir do registro do servidor. */
+export function aparelhoResumo(ua?: string | null): string | null {
+  if (!ua) return null;
+  const so = /android/i.test(ua) ? "Android" : /iphone|ipad|ios/i.test(ua) ? "iPhone/iPad"
+    : /windows/i.test(ua) ? "Windows" : /mac os|macintosh/i.test(ua) ? "Mac" : /linux/i.test(ua) ? "Linux" : null;
+  const nav = /edg\//i.test(ua) ? "Edge" : /samsungbrowser/i.test(ua) ? "Samsung Internet"
+    : /chrome|crios/i.test(ua) ? "Chrome" : /firefox|fxios/i.test(ua) ? "Firefox" : /safari/i.test(ua) ? "Safari" : null;
+  return [so, nav].filter(Boolean).join(" · ") || "Aparelho registrado";
+}
+
+/** Linha de rastro (IP e aparelho) gravada pelo servidor na assinatura; null sem registro. */
+export function rastroAssinatura(ip?: string | null, ua?: string | null): string | null {
+  const partes = [ip ? `IP ${ip}` : null, aparelhoResumo(ua)].filter(Boolean);
+  return partes.length ? partes.join(" · ") : null;
+}
+
 /** Termo de Permuta de Folga: lastro eletrônico + assinaturas digitais dos dois colaboradores. */
 export type ModoTermo = { manual?: boolean };
 
@@ -32,11 +48,11 @@ export function termoTrocaHtml(t: DpTrocaRow, empresa: { nome: string; cnpj?: st
   const x = t as unknown as Record<string, string | null>;
   const img = (v: string | null) =>
     v && /^data:image\/png;base64,[A-Za-z0-9+/=]+$/.test(v) ? `<img src="${v}" alt="Assinatura" style="max-height:60px;max-width:220px"/>` : "";
-  const assinatura = (p: DpTrocaRow["solicitante"], png: string | null, quando: string | null, papel: string) => manual ? `
+  const assinatura = (p: DpTrocaRow["solicitante"], png: string | null, quando: string | null, papel: string, rastro: string | null = null) => manual ? `
     <div class="ass"><div style="height:60px"></div><div class="linha"></div><b>${e(p?.nome ?? "—")}</b><br/>
     <small>CPF: ${e(cpfFmt(p?.cpf))}</small><br/><small>Data: ____ / ____ / ________</small></div>` : `
     <div class="ass">${png ? img(png) : `<div style="height:60px;display:flex;align-items:flex-end;justify-content:center;color:#b00;font-size:10px;padding-bottom:4px">Aguardando assinatura digital (${papel.toLowerCase()})</div>`}<div class="linha"></div><b>${e(p?.nome ?? "—")}</b><br/>
-    <small>${png ? `Assinado digitalmente em ${e(dh(quando))}` : "—"}</small></div>`;
+    <small>${png ? `Assinado digitalmente em ${e(dh(quando))}` : "—"}</small>${png && rastro ? `<br/><small>${e(rastro)}</small>` : ""}</div>`;
   return `<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"/><title>Termo de Troca de Folga</title>
 <style>
 body{font-family:Arial,sans-serif;color:#0F1B3D;margin:28px;font-size:12px;line-height:1.45}
@@ -67,8 +83,8 @@ ${manual ? "" : `<div class="lbl" style="margin-top:12px">Registro eletrônico</
 </table>`}
 <div class="aviso"><b>Ciência dos colaboradores:</b> ${e(TEXTO_CIENCIA_FALTA_TROCA)}</div>
 <div class="aviso"><b>Livre solicitação e descanso semanal:</b> ${e(TEXTO_CIENCIA_DSR_TROCA)}</div>
-<div class="asss">${assinatura(s, x.solicitante_assinatura, x.solicitante_assinado_em, "Pedido")}${assinatura(d, x.destino_assinatura, x.destino_assinado_em, "Aceite")}</div>
-<div class="rod">${manual ? "Documento para assinatura à mão pelos colaboradores." : `Documento emitido em ${e(dh(new Date().toISOString()))} pelo AVETO 360. As assinaturas acima foram feitas digitalmente pelos próprios colaboradores, logados no portal, no momento do pedido e do aceite (MP 2.200-2/2001, art. 10, §2º, e Lei 14.063/2020). Data, hora e identificador do registro ficam guardados no sistema como lastro.`}</div>
+<div class="asss">${assinatura(s, x.solicitante_assinatura, x.solicitante_assinado_em, "Pedido", rastroAssinatura(x.solicitante_ip, x.solicitante_user_agent))}${assinatura(d, x.destino_assinatura, x.destino_assinado_em, "Aceite", rastroAssinatura(x.destino_ip, x.destino_user_agent))}</div>
+<div class="rod">${manual ? "Documento para assinatura à mão pelos colaboradores." : `Documento emitido em ${e(dh(new Date().toISOString()))} pelo AVETO 360. As assinaturas acima foram feitas digitalmente pelos próprios colaboradores, logados no portal, no momento do pedido e do aceite (MP 2.200-2/2001, art. 10, §2º, e Lei 14.063/2020). Data, hora, endereço de rede (IP), aparelho e identificador do registro ficam guardados no sistema como lastro.`}</div>
 </body></html>`;
 }
 
@@ -135,7 +151,7 @@ export async function termoTrocaPdf(t: DpTrocaRow, empresa: { nome: string; cnpj
 
   novaSe(130); y -= 50;
   const col = (L - 30) / 2;
-  const bloco = async (i: number, p: DpTrocaRow["solicitante"], png: string | null, quando: string | null, papel: string) => {
+  const bloco = async (i: number, p: DpTrocaRow["solicitante"], png: string | null, quando: string | null, papel: string, rastro: string | null = null) => {
     const x0 = M + i * (col + 30);
     if (manual) { /* espaço em branco para assinar à mão */ } else if (png && /^data:image\/png;base64,/.test(png)) {
       try {
@@ -152,11 +168,11 @@ export async function termoTrocaPdf(t: DpTrocaRow, empresa: { nome: string; cnpj
     page.drawLine({ start: { x: x0, y }, end: { x: x0 + col, y }, thickness: 0.8, color: azul });
     let yy = y - 12;
     for (const l of quebrar(p?.nome ?? "-", b, 9, col)) { page.drawText(l, { x: x0 + (col - b.widthOfTextAtSize(l, 9)) / 2, y: yy, size: 9, font: b, color: azul }); yy -= 11; }
-    const subs = manual ? [w(`CPF: ${cpfFmt(p?.cpf)}`), "Data: ____ / ____ / ________"] : [w(png ? `Assinado digitalmente em ${dh(quando)}` : "-")];
+    const subs = manual ? [w(`CPF: ${cpfFmt(p?.cpf)}`), "Data: ____ / ____ / ________"] : [w(png ? `Assinado digitalmente em ${dh(quando)}` : "-"), ...(png && rastro ? [w(rastro)] : [])];
     for (const sub of subs) { page.drawText(sub, { x: x0 + (col - f.widthOfTextAtSize(sub, 7.5)) / 2, y: yy, size: 7.5, font: f, color: cinza }); yy -= 11; }
   };
-  await bloco(0, s, x.solicitante_assinatura, x.solicitante_assinado_em, "pedido");
-  await bloco(1, d, x.destino_assinatura, x.destino_assinado_em, "aceite");
+  await bloco(0, s, x.solicitante_assinatura, x.solicitante_assinado_em, "pedido", rastroAssinatura(x.solicitante_ip, x.solicitante_user_agent));
+  await bloco(1, d, x.destino_assinatura, x.destino_assinado_em, "aceite", rastroAssinatura(x.destino_ip, x.destino_user_agent));
   y -= 60;
   if (manual) par("Documento para assinatura à mão pelos colaboradores.", f, 7.5, cinza);
   else par(`Documento emitido em ${dh(new Date().toISOString())} pelo AVETO 360. Assinaturas feitas digitalmente pelos próprios colaboradores, logados no portal (MP 2.200-2/2001, art. 10, §2º, e Lei 14.063/2020).`, f, 7.5, cinza);

@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Helmet } from "react-helmet-async";
 import { useSearchParams } from "react-router-dom";
-import { CheckCircle2, ChevronRight, FileText, History, Info, ListChecks, Loader2, Upload, X } from "lucide-react";
+import { CheckCircle2, ChevronRight, FileText, History, Info, ListChecks, Loader2, ShieldCheck, Upload, X } from "lucide-react";
 import { useDpLotesDocumentoAbertos } from "@/hooks/useDpLotesDocumentoAbertos";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -25,6 +25,7 @@ import { compararUrgencia, filtrarAbertas, isDocumentoPendencia, urgenciaDe } fr
 import { useStablePendencias, UrgenciaBadge } from "@/components/dp/home/PendenciasCard";
 import DpHistoricoCompleto from "@/pages/dp/DpHistoricoCompleto";
 import { BotaoLixeira } from "@/components/dp/documentos/DocLixeiraDialog";
+import { ConferirCertificadoDialog } from "@/components/dp/documentos/ConferirCertificadoDialog";
 
 const MESES = [
   "janeiro", "fevereiro", "março", "abril", "maio", "junho",
@@ -46,7 +47,7 @@ const dataBR = (d: string) => new Date(d.slice(0, 10) + "T12:00:00").toLocaleDat
  * inicial, filtrado para documentos). O clique abre uma gaveta na própria
  * tela — sem navegar para fora — com as ações e os botões de resolução.
  */
-export function AcoesDocumentosCard({ onImportar, onHistorico, onLixeira }: { onImportar?: () => void; onHistorico?: () => void; onLixeira?: () => void } = {}) {
+export function AcoesDocumentosCard({ onImportar, onHistorico, onLixeira, onConferir }: { onImportar?: () => void; onHistorico?: () => void; onLixeira?: () => void; onConferir?: () => void } = {}) {
   const { selectedCompanyId } = useCompanyContext();
   const pendencias = useDpPendencias();
   const { data, isLoading, isFetching, isRefreshing, isError, refetch, dataUpdatedAt, lastCalculatedAt } = pendencias;
@@ -188,6 +189,11 @@ export function AcoesDocumentosCard({ onImportar, onHistorico, onLixeira }: { on
             <History className="h-4 w-4" aria-hidden="true" />
           </Button>
         )}
+        {onConferir && (
+          <Button type="button" variant="ghost" size="icon" aria-label="Conferir certificado" title="Conferir certificado" className="hidden h-11 w-11 shrink-0 rounded-xl text-muted-foreground md:inline-flex" onClick={onConferir}>
+            <ShieldCheck className="h-4 w-4" aria-hidden="true" />
+          </Button>
+        )}
         {onLixeira && (
           // No computador a Lixeira fica na barra da lista, ao lado do Registro de Alterações.
           <div className="md:hidden">
@@ -274,6 +280,9 @@ export default function DpDocumentosGestao() {
   const [abaInicial, setAbaInicial] = useState<"enviar" | "historico">("enviar");
   /** Lixeira aberta pelo atalho do topo (celular) ou pela barra da lista (computador). */
   const [lixeiraAberta, setLixeiraAberta] = useState(false);
+  /** Conferência de certificado de assinatura (PDF escolhido pelo gestor). */
+  const [conferirAberto, setConferirAberto] = useState(false);
+  const { selectedCompanyId } = useCompanyContext();
 
   /**
    * O aviso vive na URL (veio do atalho "Resolver"). Fechá-lo precisa apagar os
@@ -340,7 +349,18 @@ export default function DpDocumentosGestao() {
         onImportar={() => { setAbaInicial("enviar"); setImportarAberto(true); }}
         onHistorico={() => { setAbaInicial("historico"); setImportarAberto(true); }}
         onLixeira={() => setLixeiraAberta(true)}
+        onConferir={() => setConferirAberto(true)}
       />
+      {/* No celular o atalho fica numa linha própria para não espremer o resumo das pendências. */}
+      <button
+        type="button"
+        onClick={() => setConferirAberto(true)}
+        className="flex min-h-11 w-full items-center gap-2 rounded-xl px-2 text-left text-sm text-muted-foreground transition-colors hover:bg-muted/40 md:hidden"
+      >
+        <ShieldCheck className="h-4 w-4 shrink-0" aria-hidden="true" />
+        Conferir certificado de assinatura
+      </button>
+      <ConferirCertificadoDialog open={conferirAberto} onOpenChange={setConferirAberto} companyId={selectedCompanyId ?? null} />
 
       {lotesAbertos.length > 0 && (
         <button
