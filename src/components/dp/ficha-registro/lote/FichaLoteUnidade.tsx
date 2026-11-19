@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
 import { AlertCircle, ArrowRight, Building2, CalendarDays, CheckCircle2, ChevronRight, MapPin, Pencil, Plus, Scale } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -15,7 +16,9 @@ import { valorCatalogo } from "@/lib/dp/sindicatos-catalogo";
 import { notifyError } from "@/lib/notifyError";
 import { formatCnpj } from "@/lib/dp/ficha-registro/unidade-match";
 import { useDpFeriados } from "@/hooks/useDpFeriados";
-import { pendenciasUnidade } from "@/lib/dp/unidade-completude";
+import { useDpHorariosFuncionamento } from "@/hooks/useDpHorariosFuncionamento";
+import { supabase } from "@/integrations/supabase/client";
+import { abaParaCompletar, pendenciasUnidade } from "@/lib/dp/unidade-completude";
 import { cn } from "@/lib/utils";
 
 /** Data-base guardada como 2000-MM-DD: mostramos só dia/mês. */
@@ -73,10 +76,34 @@ export function FichaLoteUnidade({
   const { feriados, isLoading: carregandoFeriados } = useDpFeriados(unidade?.id ?? null);
   const feriadosAtivos = feriados.filter((f) => f.ativo);
   const nacionais = feriadosAtivos.filter((f) => f.categoria === "nacional").length;
+  // Mesma chave do painel de feriados: confirmar "não há feriados locais" lá atualiza aqui.
+  const cienteEm = useQuery({
+    queryKey: ["dp_unidade_feriados_ciente", unidade?.id ?? null],
+    enabled: !!unidade?.id,
+    queryFn: async () => {
+      const { data, error } = await (supabase as any)
+        .from("dp_unidades").select("feriados_locais_ciente_em").eq("id", unidade!.id).maybeSingle();
+      if (error) throw error;
+      return (data?.feriados_locais_ciente_em as string | null) ?? null;
+    },
+  });
+  const funcionamento = useDpHorariosFuncionamento(unidade?.id ?? null);
   const faltas = useMemo(
-    () => pendenciasUnidade(unidade, carregandoFeriados ? {} : { feriadosAtivos: feriadosAtivos.length }),
-    [unidade, carregandoFeriados, feriadosAtivos.length],
+    () =>
+      pendenciasUnidade(unidade, {
+        feriados: carregandoFeriados || cienteEm.isLoading || cienteEm.isError ? undefined : feriados,
+        feriadosCienteEm: cienteEm.data,
+        pessoasPrevistas: totalFichas,
+        funcionamentoDefinido:
+          funcionamento.isLoading || funcionamento.isError
+            ? undefined
+            : funcionamento.horarios.some((d) => d.aberto && (d.periodos?.length ?? 0) > 0),
+      }),
+    [unidade, carregandoFeriados, feriados, cienteEm.isLoading, cienteEm.isError, cienteEm.data, totalFichas,
+      funcionamento.isLoading, funcionamento.isError, funcionamento.horarios],
   );
+  const essenciais = faltas.filter((f) => !f.opcional);
+  const opcionais = faltas.filter((f) => f.opcional);
   const completar = (aba: UnidadeAba = "dados") => { setVerFaltas(false); setEditarUnidade(aba); };
   const mostrarSeletor = !unidadeId || trocarUnidade;
 
@@ -122,34 +149,56 @@ export function FichaLoteUnidade({
                   <PopoverTrigger asChild>
                     <button
                       type="button"
-                      className="inline-flex min-h-9 items-center gap-1.5 rounded-full border border-warning/50 bg-warning/10 px-3 text-xs font-medium"
+                      className={cn(
+                        "inline-flex min-h-9 items-center gap-1.5 rounded-full border px-3 text-xs font-medium",
+                        essenciais.length > 0 ? "border-warning/50 bg-warning/10" : "text-muted-foreground hover:bg-muted/50",
+                      )}
                     >
-                      <AlertCircle className="h-3.5 w-3.5 shrink-0 text-warning" aria-hidden="true" />
-                      Cadastro incompleto · Ver o que falta
+                      <AlertCircle className={cn("h-3.5 w-3.5 shrink-0", essenciais.length > 0 ? "text-warning" : "text-muted-foreground")} aria-hidden="true" />
+                      {essenciais.length > 0
+                        ? `Cadastro incompleto · ${essenciais.length} ${essenciais.length === 1 ? "item" : "itens"}`
+                        : "Cadastro completo · Ver opcionais"}
                       <ChevronRight className="h-3.5 w-3.5 shrink-0" aria-hidden="true" />
                     </button>
                   </PopoverTrigger>
                   <PopoverContent align="start" className="w-[min(20rem,calc(100vw-2rem))] space-y-3 p-3">
                     <div>
-                      <p className="text-sm font-semibold">Falta no cadastro da unidade</p>
-                      <p className="text-xs text-muted-foreground">Não impede a importação. Dá para completar agora ou depois.</p>
+                      <p className="text-sm font-semibold">
+                        {essenciais.length > 0 ? "Falta no cadastro da unidade" : "Dá para completar depois"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">Não impede a importação. Toque num item para ir direto a ele.</p>
                     </div>
-                    <ul className="space-y-1.5 text-sm">
-                      {faltas.map((f) => (
-                        <li key={f.chave} className="flex items-start gap-2">
-                          <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-warning" aria-hidden="true" />
-                          <span>
-                            {f.rotulo}
-                            {f.detalhe && <span className="text-muted-foreground"> · {f.detalhe}</span>}
-                          </span>
-                        </li>
-                      ))}
-                    </ul>
+                    {[essenciais, opcionais].map((lista, i) => lista.length > 0 && (
+                      <div key={i} className="space-y-1">
+                        {i === 1 && <p className="text-xs font-medium text-muted-foreground">Opcional</p>}
+                        <ul className="space-y-0.5 text-sm">
+                          {lista.map((f) => (
+                            <li key={f.chave}>
+                              <button
+                                type="button"
+                                onClick={() => completar(f.aba)}
+                                className="flex min-h-9 w-full items-start gap-2 rounded-md px-1 py-1 text-left hover:bg-muted/50"
+                              >
+                                <span
+                                  className={cn("mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full", f.opcional ? "bg-muted-foreground" : "bg-warning")}
+                                  aria-hidden="true"
+                                />
+                                <span className="min-w-0 flex-1">
+                                  {f.rotulo}
+                                  {f.detalhe && !f.opcional && <span className="text-muted-foreground"> · {f.detalhe}</span>}
+                                </span>
+                                <ChevronRight className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+                              </button>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    ))}
                     <Button
                       type="button"
                       size="sm"
                       className="h-10 w-full"
-                      onClick={() => completar(faltas.length === 1 && faltas[0].chave === "feriados" ? "feriados" : "dados")}
+                      onClick={() => completar(abaParaCompletar(faltas))}
                     >
                       Completar cadastro da unidade
                     </Button>
