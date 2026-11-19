@@ -6,11 +6,14 @@
 // - Sends OTP via Z-API WhatsApp
 // - ALWAYS returns { challenge_id, challenge_token, expires_in } to avoid user enumeration.
 //   When the identifier is unknown, no Z-API call is made but a decoy row is still created.
+// - Returns `telefone_final` (last 2 digits); unknown/no-phone accounts get a stable HMAC decoy
+//   in the same format, so the hint never reveals whether the account exists.
 import { createClient, type SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2";
 import { corsHeaders } from "npm:@supabase/supabase-js@2/cors";
 import { z } from "https://esm.sh/zod@3.23.8";
 import { checkZapiStatus, sendZapiText, normalizeBRPhone } from "../_shared/zapi.ts";
 import { verifyTurnstileToken } from "../_shared/turnstile.ts";
+import { finalTelefoneRecuperacao } from "../_shared/recuperacao-final-telefone.ts";
 
 const BodySchema = z.object({
   identifier: z.string().trim().min(3).max(255),
@@ -197,6 +200,8 @@ Deno.serve(async (req) => {
     normalized_digit_count: phone?.length ?? 0,
   });
 
+  const telefoneFinal = await finalTelefoneRecuperacao(phone, identifierHash, service);
+
   // 4) Generate OTP + challenge_token
   const otp = randomOTP6();
   const challengeToken = randomHex(24);
@@ -249,6 +254,7 @@ Deno.serve(async (req) => {
         challenge_id: inserted.id,
         challenge_token: challengeToken,
         expires_in: OTP_TTL_SECONDS,
+        telefone_final: telefoneFinal,
       });
     }
 
@@ -270,6 +276,7 @@ Deno.serve(async (req) => {
     challenge_id: inserted.id,
     challenge_token: challengeToken,
     expires_in: OTP_TTL_SECONDS,
-    // Never reveal identity or phone. Frontend shows a generic hint.
+    // Same shape for every identifier: real last 2 digits or a stable decoy.
+    telefone_final: telefoneFinal,
   });
 });

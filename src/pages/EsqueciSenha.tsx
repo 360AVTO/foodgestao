@@ -183,6 +183,7 @@ export default function EsqueciSenha() {
       }
       setChallengeId(data.challenge_id);
       setChallengeToken(data.challenge_token);
+      setTelefoneMascarado(typeof data.telefone_final === "string" ? data.telefone_final : null);
       setSecondsLeft(data.expires_in ?? 600);
       setResendIn(RESEND_COOLDOWN);
       setStep("otp");
@@ -273,10 +274,14 @@ export default function EsqueciSenha() {
           <CardDescription>
             {step === "identify" && (primeiro
               ? "Exclusivo para colaboradores cadastrados pela empresa. Digite seu CPF para enviarmos um código de segurança ao WhatsApp da sua ficha."
-              : "Informe seu e-mail ou CPF. Enviaremos um código pelo WhatsApp cadastrado.")}
-            {step === "otp" && (telefoneMascarado
-              ? `Enviamos um código de 6 dígitos para o WhatsApp com final ${telefoneMascarado}. Digite o código abaixo para criar sua senha.`
-              : "Digite o código de 6 dígitos enviado para o WhatsApp cadastrado.")}
+              : "Digite o e-mail que você usa para entrar (gestores) ou o seu CPF (colaboradores). O código de segurança vai para o WhatsApp da sua conta, não para o e-mail.")}
+            {step === "otp" && (primeiro
+              ? (telefoneMascarado
+                ? `Enviamos um código de 6 dígitos para o WhatsApp com final ${telefoneMascarado}. Digite o código abaixo para criar sua senha.`
+                : "Digite o código de 6 dígitos enviado para o WhatsApp cadastrado.")
+              : (telefoneMascarado
+                ? `Se a conta estiver cadastrada, o código de 6 dígitos foi enviado para o WhatsApp com final ${telefoneMascarado}.`
+                : "Se a conta estiver cadastrada, o código de 6 dígitos foi enviado para o WhatsApp da conta."))}
             {step === "password" && "Escolha uma nova senha forte para continuar."}
             {step === "done" && "Tudo pronto! Você já pode entrar com sua nova senha."}
           </CardDescription>
@@ -301,7 +306,7 @@ export default function EsqueciSenha() {
           {step === "identify" && (
             <form onSubmit={handleRequest} className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="identifier">{primeiro ? "CPF" : "E-mail ou CPF"}</Label>
+                <Label htmlFor="identifier">{primeiro ? "CPF" : "E-mail de acesso ou CPF"}</Label>
                 <div className="relative">
                   <IdCard className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
                   <Input
@@ -323,8 +328,8 @@ export default function EsqueciSenha() {
               {!primeiro && <Alert>
                 <MessageCircle className="h-4 w-4" />
                 <AlertDescription className="text-xs">
-                  Por segurança, não informamos se o cadastro existe. Se estiver correto, você receberá o código no
-                  WhatsApp cadastrado.
+                  O código chega pelo <strong>WhatsApp</strong> cadastrado na sua conta. O e-mail ou CPF serve só para
+                  sabermos de quem é a conta. Por segurança, não informamos se o cadastro existe.
                 </AlertDescription>
               </Alert>}
 
@@ -390,6 +395,28 @@ export default function EsqueciSenha() {
               <Button type="submit" className="w-full" disabled={submitting || secondsLeft === 0 || otp.length !== 6}>
                 {submitting ? "Verificando..." : "Verificar código"}
               </Button>
+
+              {!primeiro && (
+                <Alert>
+                  <MessageCircle className="h-4 w-4" />
+                  <AlertDescription className="text-xs space-y-1">
+                    <p>
+                      {telefoneMascarado
+                        ? `Não reconhece o final ${telefoneMascarado} ou o código não chegou em 2 minutos?`
+                        : "O código não chegou em 2 minutos?"}{" "}
+                      Sua conta pode estar sem o WhatsApp atualizado.
+                    </p>
+                    <a
+                      href={`https://wa.me/5562992365959?text=${encodeURIComponent("Olá! Pedi a recuperação de senha da Aveto 360, mas o código não chegou no meu WhatsApp.")}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="font-medium text-primary underline underline-offset-2"
+                    >
+                      Falar com o suporte da Aveto pelo WhatsApp
+                    </a>
+                  </AlertDescription>
+                </Alert>
+              )}
 
               {resendAttempts < MAX_RESENDS ? (
                 <Button
