@@ -1814,6 +1814,20 @@
       "when": 1795440419044,
       "tag": "0258_ficha_aplicar_sem_sql_dinamico",
       "breakpoints": true
+    },
+    {
+      "idx": 259,
+      "version": "7",
+      "when": 1795444305819,
+      "tag": "0259_cadastro_colaborador_sem_sql_dinamico",
+      "breakpoints": true
+    },
+    {
+      "idx": 260,
+      "version": "7",
+      "when": 1795444376515,
+      "tag": "0260_auditoria_particoes_somente_servidor",
+      "breakpoints": true
     }
   ]
 }
