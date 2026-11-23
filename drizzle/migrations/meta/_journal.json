@@ -1807,6 +1807,13 @@
       "when": 1795123932988,
       "tag": "0257_concierge_ativar_corrige_modulos",
       "breakpoints": true
+    },
+    {
+      "idx": 258,
+      "version": "7",
+      "when": 1795440419044,
+      "tag": "0258_ficha_aplicar_sem_sql_dinamico",
+      "breakpoints": true
     }
   ]
 }
