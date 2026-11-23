@@ -1828,6 +1828,13 @@
       "when": 1795444376515,
       "tag": "0260_auditoria_particoes_somente_servidor",
       "breakpoints": true
+    },
+    {
+      "idx": 261,
+      "version": "7",
+      "when": 1795445403034,
+      "tag": "0261_politicas_somente_autenticados",
+      "breakpoints": true
     }
   ]
 }
