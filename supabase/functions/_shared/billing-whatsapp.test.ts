@@ -1,6 +1,6 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import {
-  destinosWhatsapp, ESTAGIOS_WHATSAPP, mensagemWhatsapp, proximoEnvioAvulso, proximoEnvioWhatsapp, validadeWhatsapp,
+  destinosWhatsapp, ESTAGIOS_WHATSAPP, mensagemWhatsapp, nomeSaudacao, proximoEnvioAvulso, proximoEnvioWhatsapp, validadeWhatsapp,
 } from "./billing-whatsapp.ts";
 
 // Horários em Brasília (UTC-3)
@@ -141,4 +141,13 @@ Deno.test("envio avulso sai às 17h50 (fora da janela comercial), mas não depoi
   const tarde = brt("2026-11-18T17:50:00");
   assertEquals(proximoEnvioAvulso(tarde).getTime(), tarde.getTime());
   assertEquals(proximoEnvioAvulso(brt("2026-11-18T21:00:00")).toISOString(), brt("2026-11-19T08:00:00").toISOString());
+});
+
+Deno.test("saudação usa o primeiro nome só com a inicial maiúscula", () => {
+  assertEquals(nomeSaudacao("SAMANTA SOUZA"), "Samanta");
+  assertEquals(nomeSaudacao("silvio"), "Silvio");
+  assertEquals(nomeSaudacao("ÉRICA"), "Érica");
+  assertEquals(nomeSaudacao(null), "");
+  assert(mensagemWhatsapp("wa_pos_fim_2", { empresa: "X", nome: "SAMANTA" })!.startsWith("Oi, Samanta!"));
+  assert(mensagemWhatsapp("wa_pos_fim_1", { empresa: "X", nome: "SAMANTA" })!.startsWith("Olá, Samanta!"));
 });

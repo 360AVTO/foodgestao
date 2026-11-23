@@ -133,7 +133,13 @@ export function destinosWhatsapp(
   return saida;
 }
 
-const ola = (d: WaDados) => (d.nome ? `Olá, ${d.nome}!` : "Olá!");
+/** Primeiro nome com só a inicial maiúscula ("SAMANTA SILVA" → "Samanta"), também em nomes com hífen. */
+export function nomeSaudacao(nome: string | null | undefined): string {
+  const p = String(nome ?? "").trim().split(/\s+/)[0] ?? "";
+  return p.split("-").map((x) => x ? x.charAt(0).toLocaleUpperCase("pt-BR") + x.slice(1).toLocaleLowerCase("pt-BR") : x).join("-");
+}
+const ola = (d: WaDados) => (nomeSaudacao(d.nome) ? `Olá, ${nomeSaudacao(d.nome)}!` : "Olá!");
+const oi = (d: WaDados) => (nomeSaudacao(d.nome) ? `Oi, ${nomeSaudacao(d.nome)}!` : "Oi!");
 const emp = (d: WaDados) => d.empresa || "sua empresa";
 const val = (d: WaDados) => d.valor || "em aberto";
 const mod = (d: WaDados) => (d.modulo ? ` do ${d.modulo}` : "");
@@ -198,7 +204,7 @@ export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
       return `${ola(d)} Tudo bem?\n\nPassando para saber como está a rotina da ${comoSeChama(d)} e se podemos te apoiar com a escala da equipe.${planoCurto(d)}\n\n${acesso}${planos}\n\nFicou alguma dúvida ou algo que possamos te ajudar por aí hoje?`;
     }
     case WA_POS_FIM_2:
-      return `${d.nome ? `Oi, ${d.nome}!` : "Oi!"}\n\nPassando para saber se ficou alguma dúvida sobre a escala ou se prefere conversar sobre o melhor formato para a ${comoSeChama(d)}.\n\nQuando quiser seguir, é por aqui:${planos}\n\nPodemos te ajudar com alguma coisa?`;
+      return `${oi(d)}\n\nPassando para saber se ficou alguma dúvida sobre a escala ou se prefere conversar sobre o melhor formato para a ${comoSeChama(d)}.\n\nQuando quiser seguir, é por aqui:${planos}\n\nPodemos te ajudar com alguma coisa?`;
 
     // ---------- carência / cortesia ----------
     case "oferta_plano":
@@ -217,10 +223,10 @@ export function mensagemWhatsapp(stage: string, d: WaDados): string | null {
       const pergunta = d.forma === "pix"
         ? "Teve alguma dificuldade com o Pix ou prefere pagar por boleto?"
         : "Teve alguma dificuldade com o boleto ou precisa de uma 2ª via por aqui?";
-      return `${d.nome ? `Oi, ${d.nome}!` : "Oi!"}\n\nA fatura do AVETO 360 da ${comoSeChama(d)} segue em aberto, mas o acesso da equipe continua 100% liberado.\n\nPara regularizar quando puder:${pagar}\n\n${pergunta}`;
+      return `${oi(d)}\n\nA fatura do AVETO 360 da ${comoSeChama(d)} segue em aberto, mas o acesso da equipe continua 100% liberado.\n\nPara regularizar quando puder:${pagar}\n\n${pergunta}`;
     }
     case WA_CARTAO_NAO_CONFIRMADO:
-      return `${d.nome ? `Oi, ${d.nome}!` : "Oi!"}\n\nNão conseguimos confirmar no cartão a mensalidade do AVETO 360 da ${comoSeChama(d)}, mas o acesso da equipe continua 100% liberado.\n\nSe preferir, dá para pagar por Pix ou boleto aqui:${pagar}\n\nQuer ajuda para atualizar o cartão por aqui?`;
+      return `${oi(d)}\n\nNão conseguimos confirmar no cartão a mensalidade do AVETO 360 da ${comoSeChama(d)}, mas o acesso da equipe continua 100% liberado.\n\nSe preferir, dá para pagar por Pix ou boleto aqui:${pagar}\n\nQuer ajuda para atualizar o cartão por aqui?`;
 
     // ---------- confirmação ----------
     case "reativacao":
