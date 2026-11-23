@@ -84,7 +84,7 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
         onOpenChange={onOpenChange}
         title="Lote repassado"
         description={resultado.convite
-          ? `${primeiro} recebeu o link para criar a senha. Ao entrar, cai direto nas fichas e informa se é o proprietário ou o administrador.`
+          ? `${primeiro} recebeu o link para criar a senha. Ao entrar, cai direto nas fichas.`
           : `${primeiro} continua a conferência nesta mesma tela.`}
         footer={
           <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-end">
@@ -202,7 +202,7 @@ export function NotificarResponsavelDialog({ open, onOpenChange, importacaoId, e
           <p className="text-muted-foreground">
             Já organizamos {pendentes} {pendentes === 1 ? "ficha de registro" : "fichas de registro"} da {empresaNome}: unidade,
             cargos e setores estão configurados. {pendente
-              ? "Crie sua senha pelo link e confira os cadastros. No primeiro acesso você informa se é o proprietário ou o administrador da empresa."
+              ? "Crie sua senha pelo link e confira os cadastros."
               : "Agora é só conferir os dados da equipe e concluir os cadastros."}
           </p>
         </div>

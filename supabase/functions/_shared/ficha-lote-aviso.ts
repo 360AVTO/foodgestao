@@ -35,9 +35,8 @@ export function mensagemConviteLoteFicha(o: {
     `Preparamos o ambiente da *${o.empresa}* e já organizamos ${fichas} da sua equipe: unidade, cargos e setores estão configurados.\n\n`;
   if (o.contaExistente) {
     return `${inicio}Entre com a sua senha de sempre para aceitar o acesso e conferir os cadastros:\n👉 ${o.link}\n\n` +
-      `No primeiro acesso você informa se é o proprietário ou o administrador da empresa. Qualquer dúvida, estamos por aqui!`;
+      `Qualquer dúvida, estamos por aqui!`;
   }
   return `${inicio}Crie sua senha e confira os cadastros (leva menos de 1 minuto):\n👉 ${o.link}\n\n` +
-    `No primeiro acesso você informa se é o proprietário ou o administrador da empresa. ` +
     `Seus 7 dias de teste grátis começam quando você criar a senha. Qualquer dúvida, estamos por aqui!`;
 }
